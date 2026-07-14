@@ -29,6 +29,11 @@ export interface FetchCall {
   method: string;
 }
 
+export interface EffectCall {
+  line: number;
+  hasDependencyArray: boolean;
+}
+
 export interface ParsedComponent {
   name: string;
   bodyStartLine: number;
@@ -36,6 +41,7 @@ export interface ParsedComponent {
   totalLines: number;
   hooks: HookCall[];
   fetchCalls: FetchCall[];
+  effectCalls: EffectCall[];
 }
 
 const HOOK_REGEX = /^use[A-Z]/;
@@ -187,6 +193,7 @@ function walkBody(
   branchingDepth: number,
   hooks: HookCall[],
   fetchCalls: FetchCall[],
+  effectCalls: EffectCall[],
 ): void {
   if (isCallExpression(node)) {
     const callName = getCallName(node);
@@ -198,6 +205,13 @@ function walkBody(
         name: callName,
         line,
         isTopLevel: branchingDepth === 0,
+      });
+    }
+
+    if (callName === "useEffect") {
+      effectCalls.push({
+        line,
+        hasDependencyArray: node.arguments.length >= 2,
       });
     }
 
@@ -221,11 +235,11 @@ function walkBody(
     if (Array.isArray(value)) {
       for (const item of value) {
         if (item !== null && item !== undefined && typeof item === "object" && "type" in item) {
-          walkBody(item as Node, nextDepth, hooks, fetchCalls);
+          walkBody(item as Node, nextDepth, hooks, fetchCalls, effectCalls);
         }
       }
     } else if (value !== null && value !== undefined && typeof value === "object" && "type" in value) {
-      walkBody(value as Node, nextDepth, hooks, fetchCalls);
+      walkBody(value as Node, nextDepth, hooks, fetchCalls, effectCalls);
     }
   }
 }
@@ -275,6 +289,7 @@ function buildParsedComponent(
   body: BlockStatement | Expression,
   hooks: HookCall[],
   fetchCalls: FetchCall[],
+  effectCalls: EffectCall[],
 ): ParsedComponent {
   const bodyStartLine = body.loc?.start.line ?? 0;
   const bodyEndLine = body.loc?.end.line ?? 0;
@@ -287,6 +302,7 @@ function buildParsedComponent(
     totalLines,
     hooks,
     fetchCalls,
+    effectCalls,
   };
 }
 
@@ -358,11 +374,12 @@ export function parseReactComponent(filePath: string): ParsedComponent | null {
     const name = getComponentName(functionNode, declarator ?? stmt);
     const hooks: HookCall[] = [];
     const fetchCalls: FetchCall[] = [];
+    const effectCalls: EffectCall[] = [];
 
     const walkRoot = isBlockStatement(componentBody) ? componentBody : functionNode;
-    walkBody(walkRoot, 0, hooks, fetchCalls);
+    walkBody(walkRoot, 0, hooks, fetchCalls, effectCalls);
 
-    return buildParsedComponent(name, functionNode, componentBody, hooks, fetchCalls);
+    return buildParsedComponent(name, functionNode, componentBody, hooks, fetchCalls, effectCalls);
   }
 
   console.error("[Pristine Parser] No React component found in:", filePath);
