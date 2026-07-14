@@ -21,7 +21,8 @@
     "@babel/parser": "^8.0.4",
     "@babel/traverse": "^8.0.4",
     "@babel/types": "^8.0.4",
-    "@modelcontextprotocol/sdk": "^1.29.0"
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@types/babel__traverse": "^7.28.0",

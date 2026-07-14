@@ -9,19 +9,13 @@ import {
   isBlockStatement,
   isReturnStatement,
   isCallExpression,
-  isIfStatement,
-  isForStatement,
-  isWhileStatement,
-  isDoWhileStatement,
-  isSwitchStatement,
-  isConditionalExpression,
-  isTryStatement,
-  isCatchClause,
   isFunctionDeclaration,
   isFunctionExpression,
   isArrowFunctionExpression,
   isVariableDeclaration,
+  isVariableDeclarator,
   isExportDefaultDeclaration,
+  isExportNamedDeclaration,
 } from "@babel/types";
 
 export interface HookCall {
@@ -76,51 +70,84 @@ function getCallObject(node: CallExpression): string | undefined {
   return undefined;
 }
 
+/**
+ * Parcourt récursivement un nœud AST pour vérifier s'il contient du JSX
+ * (Balise classique ou fragment). Cela permet de détecter les retours de JSX
+ * même s'ils sont cachés dans des ternaires, des ifs ou des expressions logiques.
+ */
+function hasJSXDeep(node: Node): boolean {
+  if (isJSXElement(node) || isJSXFragment(node)) {
+    return true;
+  }
+
+  for (const key of Object.keys(node)) {
+    if (isSkippedKey(key)) {
+      continue;
+    }
+    const value = (node as unknown as Record<string, unknown>)[key];
+    if (Array.isArray(value)) {
+      for (const item of value) {
+        if (item !== null && item !== undefined && typeof item === "object" && "type" in item) {
+          if (hasJSXDeep(item as Node)) {
+            return true;
+          }
+        }
+      }
+    } else if (value !== null && value !== undefined && typeof value === "object" && "type" in value) {
+      if (hasJSXDeep(value as Node)) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
 function isJSXReturningFunction(
   node: Node,
 ): BlockStatement | Expression | undefined {
   if (isFunctionDeclaration(node) && node.body) {
-    if (returnsJSX(node.body)) {
+    if (hasJSXDeep(node.body)) {
       return node.body;
     }
   }
   if (isFunctionExpression(node) || isArrowFunctionExpression(node)) {
-    if (isBlockStatement(node.body) && returnsJSX(node.body)) {
+    if (isBlockStatement(node.body) && hasJSXDeep(node.body)) {
       return node.body;
     }
-    if (!isBlockStatement(node.body) && isJSXElementOrFragment(node.body)) {
+    if (!isBlockStatement(node.body) && hasJSXDeep(node.body)) {
       return node.body;
     }
   }
   return undefined;
 }
 
-function isJSXElementOrFragment(node: Node): boolean {
-  return isJSXElement(node) || isJSXFragment(node);
-}
-
-function returnsJSX(body: BlockStatement): boolean {
-  return body.body.some(
-    (stmt) =>
-      isReturnStatement(stmt) &&
-      stmt.argument !== null &&
-      stmt.argument !== undefined &&
-      isJSXElementOrFragment(stmt.argument),
-  );
-}
-
 function getComponentName(
-  node: Node,
-  exportDefaultDecl?: Node,
+  functionNode: Node,
+  parentDecl?: Node,
 ): string {
-  if (isFunctionDeclaration(node) && node.id) {
-    return node.id.name;
+  if (isFunctionDeclaration(functionNode) && functionNode.id) {
+    return functionNode.id.name;
   }
-  if (isFunctionExpression(node) && node.id) {
-    return node.id.name;
+  if (isFunctionExpression(functionNode) && functionNode.id) {
+    return functionNode.id.name;
   }
-  if (exportDefaultDecl && isExportDefaultDeclaration(exportDefaultDecl)) {
+  if (parentDecl && isVariableDeclarator(parentDecl) && isIdentifier(parentDecl.id)) {
+    return parentDecl.id.name;
+  }
+  if (parentDecl && isExportDefaultDeclaration(parentDecl)) {
     return "default";
+  }
+  if (parentDecl && isExportNamedDeclaration(parentDecl)) {
+    const decl = parentDecl.declaration;
+    if (decl && isVariableDeclaration(decl)) {
+      const first = decl.declarations[0];
+      if (first && isVariableDeclarator(first) && isIdentifier(first.id)) {
+        return first.id.name;
+      }
+    }
+    if (decl && isFunctionDeclaration(decl) && decl.id) {
+      return decl.id.name;
+    }
   }
   return "UnnamedComponent";
 }
@@ -236,6 +263,9 @@ function isReactComponentCandidate(node: Node): boolean {
       isFunctionExpression(node.declaration)
     );
   }
+  if (isExportNamedDeclaration(node) && node.declaration) {
+    return isReactComponentCandidate(node.declaration);
+  }
   return false;
 }
 
@@ -264,7 +294,8 @@ export function parseReactComponent(filePath: string): ParsedComponent | null {
   let sourceText: string;
   try {
     sourceText = readFileSync(filePath, "utf-8");
-  } catch {
+  } catch (readError: unknown) {
+    console.error("[Pristine Parser] Failed to read file:", filePath, readError);
     return null;
   }
 
@@ -274,23 +305,30 @@ export function parseReactComponent(filePath: string): ParsedComponent | null {
       sourceType: "module",
       plugins: ["typescript", "jsx"],
     });
-  } catch {
+  } catch (parseError: unknown) {
+    const msg = parseError instanceof Error ? parseError.message : String(parseError);
+    console.error("[Pristine Parser] Babel parse error for", filePath, ":", msg);
     return null;
   }
 
   for (const stmt of ast.program.body) {
-    if (!isReactComponentCandidate(stmt)) {
+    const unwrapped = isExportNamedDeclaration(stmt) && stmt.declaration
+      ? stmt.declaration
+      : stmt;
+
+    if (!isReactComponentCandidate(unwrapped)) {
       continue;
     }
 
     let functionNode: Node | undefined;
     let componentBody: BlockStatement | Expression | undefined;
+    let declarator: Node | undefined;
 
-    if (isFunctionDeclaration(stmt)) {
-      functionNode = stmt;
-      componentBody = isJSXReturningFunction(stmt);
-    } else if (isVariableDeclaration(stmt)) {
-      for (const decl of stmt.declarations) {
+    if (isFunctionDeclaration(unwrapped)) {
+      functionNode = unwrapped;
+      componentBody = isJSXReturningFunction(unwrapped);
+    } else if (isVariableDeclaration(unwrapped)) {
+      for (const decl of unwrapped.declarations) {
         if (!decl.init) {
           continue;
         }
@@ -298,12 +336,13 @@ export function parseReactComponent(filePath: string): ParsedComponent | null {
           componentBody = isJSXReturningFunction(decl.init);
           if (componentBody) {
             functionNode = decl.init;
+            declarator = decl;
             break;
           }
         }
       }
-    } else if (isExportDefaultDeclaration(stmt)) {
-      const decl = stmt.declaration;
+    } else if (isExportDefaultDeclaration(unwrapped)) {
+      const decl = unwrapped.declaration;
       if (isFunctionDeclaration(decl) || isArrowFunctionExpression(decl) || isFunctionExpression(decl)) {
         componentBody = isJSXReturningFunction(decl);
         if (componentBody) {
@@ -316,7 +355,7 @@ export function parseReactComponent(filePath: string): ParsedComponent | null {
       continue;
     }
 
-    const name = getComponentName(functionNode, stmt);
+    const name = getComponentName(functionNode, declarator ?? stmt);
     const hooks: HookCall[] = [];
     const fetchCalls: FetchCall[] = [];
 
@@ -326,5 +365,6 @@ export function parseReactComponent(filePath: string): ParsedComponent | null {
     return buildParsedComponent(name, functionNode, componentBody, hooks, fetchCalls);
   }
 
+  console.error("[Pristine Parser] No React component found in:", filePath);
   return null;
 }
