@@ -120,6 +120,15 @@ export function parseReactComponent(filePath: string): AnalysisResult[] {
 
     const violations: RuleViolation[] = [];
 
+    /**
+     * Collect JSX dependencies: every <CapitalizedName> element encountered
+     * during the AST walk is recorded as a dependency of this component.
+     * This powers the "Component Tree Map" in the project-folder report
+     * and will later enable props-drilling detection.
+     */
+    const dependencies: string[] = [];
+    const seenDeps = new Set<string>();
+
     const context: RuleContext = {
       componentName: name,
       componentTotalLines: totalLines,
@@ -133,6 +142,36 @@ export function parseReactComponent(filePath: string): AnalysisResult[] {
       const ruleListeners = register(context);
       mergeListeners(masterListeners, ruleListeners);
     }
+
+    /**
+     * Inline listener that fires on every JSX opening element tag.
+     * If the tag name starts with an uppercase letter (React convention
+     * for custom components), we record it as a dependency.
+     */
+    mergeListeners(masterListeners, {
+      "JSXOpeningElement": [
+        (node: any) => {
+          let depName: string | undefined;
+
+          // <SimpleButton />                    → JSXIdentifier
+          // <Foo.Bar />                         → JSXMemberExpression
+          if (node.name?.type === "JSXIdentifier") {
+            depName = node.name.name;
+          } else if (node.name?.type === "JSXMemberExpression") {
+            const obj = node.name.object?.name ?? "";
+            const prop = node.name.property?.name ?? "";
+            depName = `${obj}.${prop}`;
+          }
+
+          // Only keep names starting with a capital letter — this
+          // matches the React convention for user-defined components.
+          if (depName && /^[A-Z]/.test(depName) && !seenDeps.has(depName)) {
+            seenDeps.add(depName);
+            dependencies.push(depName);
+          }
+        },
+      ],
+    });
 
     const walkRoot = isBlockStatement(componentBody) ? componentBody : functionNode;
     traverseAST(walkRoot, masterListeners);
@@ -149,6 +188,7 @@ export function parseReactComponent(filePath: string): AnalysisResult[] {
       totalLines,
       issues: violations,
       passed: violations.length === 0,
+      dependencies,
     });
   }
 

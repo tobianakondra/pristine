@@ -16,13 +16,16 @@ The source tree is split into three directories, each with a single responsibili
 
 ```
 src/
-  index.ts              — Server bootstrap & tool declarations (McpServer + Zod)
+  index.ts              — Server bootstrap, tool declarations (McpServer + Zod) & component tree builder
   types.ts              — Shared type definitions (RuleViolation, AnalysisResult, ASTListener, RuleContext)
+  utils/                — Filesystem utilities
+    fileFinder.ts       — Recursive findTsFiles(dirPath): walks a directory tree, ignores node_modules/.git/dist/build/.next
   parser/               — AST parsing, generic traversal & orchestration
     astHelpers.ts       — Pure Babel detection helpers (isHookCall, isReactComponentCandidate, getComponentName, etc.)
     bodyExtractor.ts    — Generic traverseAST(node, listeners): recursive walker with enter/exit support
     reactComponentParser.ts — Orchestrator: reads file → parses with Babel → finds component →
-                              creates RuleContext → merges rule listeners → traverseAST → returns AnalysisResult
+                              creates RuleContext → merges rule listeners → traverseAST →
+                              returns AnalysisResult[] (one per component, with JSX dependencies)
   rules/                — Individual maintainability rules
     componentLengthRule.ts  — Component line-count limit (> 100 → warning)
     hooksSeparationRule.ts  — Hooks inside conditions/loops → error
@@ -30,6 +33,7 @@ src/
     nakedEffectRule.ts      — useEffect without dependency array → error
     noExplicitAnyRule.ts    — Explicit `any` type usage → warning
     inlineStyleAbuseRule.ts — Inline styles with > 3 properties → warning
+    stateFatnessRule.ts     — Components with > 4 useState → warning
 ```
 
 ### `src/parser/` — Parsing Layer (3 files)
@@ -40,7 +44,7 @@ The parser layer is split into three files for clear separation of concerns:
 
 - **`bodyExtractor.ts`** — A single generic function `traverseAST(node, listeners)` that recursively walks any Babel AST subtree. For every node it calls the node-type listeners on enter (before children), then all children, then the `type:exit` listeners (after children). This is the ESLint-inspired "Visitor Pattern": the walker knows nothing about React, hooks, or CSS — it just provides the traversal mechanism.
 
-- **`reactComponentParser.ts`** — Orchestrator that reads the file, parses it with `@babel/parser`, finds the React component, creates a `RuleContext` (with a shared `violations[]` array), calls each rule's `registerListeners(context)` to collect their AST event listeners, merges them into a single registry, runs `traverseAST` on the component body, then returns the complete `AnalysisResult`.
+- **`reactComponentParser.ts`** — Orchestrator that reads the file, parses it with `@babel/parser`, finds the React component, creates a `RuleContext` (with a shared `violations[]` array), calls each rule's `registerListeners(context)` to collect their AST event listeners, merges them into a single registry, runs `traverseAST` on the component body, then returns the complete `AnalysisResult`. During the AST walk, an **inline listener on `JSXOpeningElement`** captures every capitalized JSX tag name (e.g. `<ProfileForm />`) and records it as a **dependency** of the current component. These dependencies are returned in the `dependencies: string[]` field of `AnalysisResult` and power the **Component Tree Map** in the project-scan report. The function returns `AnalysisResult[]` (one entry per component in the file) instead of a single result, so multi-component files are fully analysed without silent skipping.
 
 This decomposition means each file stays under 200 lines and can be tested or modified independently.
 
@@ -69,10 +73,11 @@ This is directly inspired by ESLint's rule API: each rule declares what AST even
 
 ### `src/index.ts` — Entry Point & Tool Definitions
 
-Minimal bootstrap file that:
+Bootstrap file that:
 - Creates the MCP `McpServer` instance
-- Declares the `analyze_react_component` tool inline via `server.tool(name, description, schema, handler)` with Zod schema validation
-- Calls `parseReactComponent` (which internally runs all rules)
+- Declares the `analyze_react_component` tool via `server.tool(...)`
+- Declares the `analyze_project_folder` tool that recursively scans a directory tree using `findTsFiles`, analyses every component, then produces a summary report including a **Component Tree Map**
+- Contains `buildComponentTree()` which builds a textual Unicode tree from the dependency graph (roots are entry-point components, children are their JSX dependencies, with path-based cycle detection)
 - Connects to `StdioServerTransport`
 
 No business logic and no per-rule imports live here. Adding a new rule requires only creating the rule file and adding it to the `RULE_REGISTRATIONS` array in `reactComponentParser.ts`.
@@ -82,39 +87,44 @@ No business logic and no per-rule imports live here. Adding a new rule requires 
 ```
 Client (LLM) → stdin/stdout → index.ts (McpServer)
                                     │
-                           server.tool("analyze_react_component")
-                                    │
-                           parseReactComponent(filePath)
-                               ┌─────┴─────┐
-                               │           │
-                        astHelpers   reactComponentParser
-                        (utilities)   (orchestrator)
-                               │           │
-                               │    ┌──────┴──────┐
-                               │    │             │
-                               │  RuleContext  RULE_REGISTRATIONS
-                               │    │        (6 registerListeners)
-                               │    │             │
-                               │    └──────┬──────┘
-                               │           │
-                               │    masterListeners
-                               │           │
-                               │    traverseAST(componentBody, masterListeners)
-                               │      ┌─────┴──────┐
-                               │      │  node.type  │
-                               │      │  matching   │
-                               │      │  callbacks  │
-                               │      └─────┬──────┘
-                               │           │
-                               │    context.violations[]
-                               │           │
-                               └─────┬─────┘
-                                     │
-                             AnalysisResult
-                                     │
-                            formatAnalysisResult
-                                     │
-                           { content: [{ type: "text", text }] }
+                    ┌───────────────┴───────────────┐
+                    │                               │
+          "analyze_react_component"      "analyze_project_folder"
+                    │                               │
+          parseReactComponent(file)        findTsFiles(folder)
+                    │                               │
+               ┌────┴────┐                   parseReactComponent (×N)
+               │         │                         │
+         astHelpers  reactComponentParser    allResults[]
+         (utilities)  (orchestrator)               │
+               │         │                   buildComponentTree()
+               │    ┌────┴──────┐                  │
+               │    │           │            Component Tree Map
+               │  RuleContext  RULE_REGISTRATIONS  │
+               │    │       (+ inline deps         │
+               │    │        listener on            + stats + violations
+               │    │     JSXOpeningElement)        │
+               │    └──────┬──────┘           formatted report
+               │           │
+               │    masterListeners
+               │           │
+               │    traverseAST(componentBody, listeners)
+               │      ┌─────┴──────┐
+               │      │  node.type  │  JSXOpeningElement
+               │      │  matching   │  → collect dependency
+               │      │  callbacks  │
+               │      └─────┬──────┘
+               │           │
+               │    context.violations[]
+               │    dependencies[]
+               │           │
+               └─────┬─────┘
+                     │
+              AnalysisResult[]
+                     │
+            formatAnalysisResult / report builder
+                     │
+           { content: [{ type: "text", text }] }
 ```
 
 ## Extending

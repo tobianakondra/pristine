@@ -11,6 +11,8 @@ export interface AnalysisResult {
   totalLines: number;
   issues: RuleViolation[];
   passed: boolean;
+  /** Names of other React components instantiated in this component's JSX. */
+  dependencies: string[];
 }
 
 export type ASTListener = (node: any) => void;

@@ -145,6 +145,13 @@ server.tool(
       }
     }
 
+    // 4c. Component dependency tree.
+    lines.push("─".repeat(56));
+    lines.push("  Component Tree Map");
+    lines.push("─".repeat(56));
+    lines.push("");
+    lines.push(buildComponentTree(allResults));
+    lines.push("");
     lines.push("=".repeat(56));
 
     return {
@@ -174,6 +181,119 @@ function formatAnalysisResult(result: AnalysisResult): string {
   }
 
   return lines.join("\n");
+}
+
+/**
+ * Builds an indented textual tree of the component dependency graph.
+ *
+ * How it works:
+ *   1. Build a map from each component → its JSX dependencies.
+ *   2. Build a reverse map (component → its parents in the project).
+ *   3. Roots are components that no other project component depends on.
+ *   4. Recursive descent with path-based cycle detection and
+ *      backtracking so shared children appear under every parent.
+ *
+ * @param allResults - All component analysis results from the scan.
+ * @returns A formatted multi-line string ready for the report.
+ */
+function buildComponentTree(allResults: AnalysisResult[]): string {
+  // ── 1. Build the dependency map ──────────────────────────────────
+  // depMap: component name → set of component names it uses in JSX
+  const depMap = new Map<string, string[]>();
+  // allCompNames: every component found in the project (used to
+  // distinguish internal deps from external library references)
+  const allCompNames = new Set<string>();
+
+  for (const r of allResults) {
+    allCompNames.add(r.componentName);
+    // Keep only dependencies that are also project components.
+    // External references (e.g. <Button /> from a UI library) are
+    // intentionally ignored — they don't belong in the tree.
+    const internalDeps = r.dependencies.filter((d) => {
+      // Match by name. In a full-featured resolver we would match by
+      // import path, but name-based matching covers the common case.
+      return allCompNames.has(d);
+    });
+    // Deduplicate via Set to avoid noise in the tree output.
+    depMap.set(r.componentName, [...new Set(internalDeps)]);
+  }
+
+  if (allCompNames.size === 0) {
+    return "  (no components found)";
+  }
+
+  // ── 2. Build the reverse map (parents) ───────────────────────────
+  // parentMap: component name → set of components that depend on it
+  const parentMap = new Map<string, Set<string>>();
+  for (const [comp, deps] of depMap) {
+    for (const dep of deps) {
+      if (!parentMap.has(dep)) parentMap.set(dep, new Set());
+      parentMap.get(dep)!.add(comp);
+    }
+  }
+
+  // ── 3. Identify root components ──────────────────────────────────
+  // A root is a component that no other project component lists as a
+  // dependency (i.e. it has no parent in the graph). These are the
+  // entry points of the application.
+  const roots = [...allCompNames].filter(
+    (name) => !parentMap.has(name) || parentMap.get(name)!.size === 0,
+  );
+
+  if (roots.length === 0) {
+    return "  (all components depend on each other — no root entry point)";
+  }
+
+  // ── 4. Recursive tree printer ────────────────────────────────────
+  const treeLines: string[] = [];
+
+  /**
+   * Prints one node of the tree and recurses into its children.
+   *
+   * @param name   - Current component name.
+   * @param prefix - Indentation string (spaces + tree guides) for this level.
+   * @param isLast - Whether this is the last sibling (affects connector glyph).
+   * @param path   - Component names visited in the current branch (for cycle detection).
+   */
+  function printNode(
+    name: string,
+    prefix: string,
+    isLast: boolean,
+    path: Set<string>,
+  ): void {
+    const connector = isLast ? "└── " : "├── ";
+
+    // Cycle detection: if this component is already in the current path,
+    // we have a circular dependency. Print it once and stop descending.
+    if (path.has(name)) {
+      treeLines.push(`${prefix}${connector}${name}  (*cycle*)`);
+      return;
+    }
+
+    treeLines.push(`${prefix}${connector}${name}`);
+
+    const children = depMap.get(name);
+    if (!children || children.length === 0) return;
+
+    // Mark this component as visited in the current path.
+    const nextPath = new Set(path);
+    nextPath.add(name);
+
+    // Build the child prefix: if this is the last sibling, the guide
+    // line stops here ("    "); otherwise it continues ("│   ").
+    const childPrefix = prefix + (isLast ? "    " : "│   ");
+
+    children.forEach((child, idx) => {
+      printNode(child, childPrefix, idx === children.length - 1, nextPath);
+    });
+  }
+
+  // Print the forest (all root trees).
+  roots.forEach((root, idx) => {
+    printNode(root, "  ", idx === roots.length - 1, new Set());
+  });
+
+  return treeLines.join("\n");
 }
 
 async function main(): Promise<void> {
