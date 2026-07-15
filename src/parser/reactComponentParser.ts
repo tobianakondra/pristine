@@ -1,287 +1,30 @@
 import { readFileSync } from "node:fs";
 import { parse } from "@babel/parser";
-import type { Node, BlockStatement, CallExpression, Expression, File } from "@babel/types";
+import type { File, BlockStatement, Expression, Node } from "@babel/types";
 import {
-  isIdentifier,
-  isMemberExpression,
-  isJSXElement,
-  isJSXFragment,
-  isBlockStatement,
-  isReturnStatement,
-  isCallExpression,
-  isFunctionDeclaration,
-  isFunctionExpression,
-  isArrowFunctionExpression,
-  isVariableDeclaration,
-  isVariableDeclarator,
-  isExportDefaultDeclaration,
   isExportNamedDeclaration,
+  isFunctionDeclaration,
+  isVariableDeclaration,
+  isExportDefaultDeclaration,
+  isArrowFunctionExpression,
+  isFunctionExpression,
+  isBlockStatement,
 } from "@babel/types";
+import type {
+  ParsedComponent,
+  HookCall,
+  FetchCall,
+  EffectCall,
+} from "./astHelpers.js";
+import {
+  isReactComponentCandidate,
+  isJSXReturningFunction,
+  getComponentName,
+  getFunctionLineCount,
+} from "./astHelpers.js";
+import { walkBody } from "./bodyExtractor.js";
 
-export interface HookCall {
-  name: string;
-  line: number;
-  isTopLevel: boolean;
-}
-
-export interface FetchCall {
-  line: number;
-  method: string;
-}
-
-export interface EffectCall {
-  line: number;
-  hasDependencyArray: boolean;
-}
-
-export interface ParsedComponent {
-  name: string;
-  bodyStartLine: number;
-  bodyEndLine: number;
-  totalLines: number;
-  hooks: HookCall[];
-  fetchCalls: FetchCall[];
-  effectCalls: EffectCall[];
-}
-
-const HOOK_REGEX = /^use[A-Z]/;
-
-const AXIOS_PROPERTY_METHODS = new Set([
-  "get",
-  "post",
-  "put",
-  "patch",
-  "delete",
-  "request",
-]);
-
-function isHookCall(name: string): boolean {
-  return name.length > 3 && HOOK_REGEX.test(name);
-}
-
-function getCallName(node: CallExpression): string | undefined {
-  if (isIdentifier(node.callee)) {
-    return node.callee.name;
-  }
-  if (isMemberExpression(node.callee) && isIdentifier(node.callee.property)) {
-    return node.callee.property.name;
-  }
-  return undefined;
-}
-
-function getCallObject(node: CallExpression): string | undefined {
-  if (isMemberExpression(node.callee) && isIdentifier(node.callee.object)) {
-    return node.callee.object.name;
-  }
-  return undefined;
-}
-
-/**
- * Parcourt récursivement un nœud AST pour vérifier s'il contient du JSX
- * (Balise classique ou fragment). Cela permet de détecter les retours de JSX
- * même s'ils sont cachés dans des ternaires, des ifs ou des expressions logiques.
- */
-function hasJSXDeep(node: Node): boolean {
-  if (isJSXElement(node) || isJSXFragment(node)) {
-    return true;
-  }
-
-  for (const key of Object.keys(node)) {
-    if (isSkippedKey(key)) {
-      continue;
-    }
-    const value = (node as unknown as Record<string, unknown>)[key];
-    if (Array.isArray(value)) {
-      for (const item of value) {
-        if (item !== null && item !== undefined && typeof item === "object" && "type" in item) {
-          if (hasJSXDeep(item as Node)) {
-            return true;
-          }
-        }
-      }
-    } else if (value !== null && value !== undefined && typeof value === "object" && "type" in value) {
-      if (hasJSXDeep(value as Node)) {
-        return true;
-      }
-    }
-  }
-  return false;
-}
-
-function isJSXReturningFunction(
-  node: Node,
-): BlockStatement | Expression | undefined {
-  if (isFunctionDeclaration(node) && node.body) {
-    if (hasJSXDeep(node.body)) {
-      return node.body;
-    }
-  }
-  if (isFunctionExpression(node) || isArrowFunctionExpression(node)) {
-    if (isBlockStatement(node.body) && hasJSXDeep(node.body)) {
-      return node.body;
-    }
-    if (!isBlockStatement(node.body) && hasJSXDeep(node.body)) {
-      return node.body;
-    }
-  }
-  return undefined;
-}
-
-function getComponentName(
-  functionNode: Node,
-  parentDecl?: Node,
-): string {
-  if (isFunctionDeclaration(functionNode) && functionNode.id) {
-    return functionNode.id.name;
-  }
-  if (isFunctionExpression(functionNode) && functionNode.id) {
-    return functionNode.id.name;
-  }
-  if (parentDecl && isVariableDeclarator(parentDecl) && isIdentifier(parentDecl.id)) {
-    return parentDecl.id.name;
-  }
-  if (parentDecl && isExportDefaultDeclaration(parentDecl)) {
-    return "default";
-  }
-  if (parentDecl && isExportNamedDeclaration(parentDecl)) {
-    const decl = parentDecl.declaration;
-    if (decl && isVariableDeclaration(decl)) {
-      const first = decl.declarations[0];
-      if (first && isVariableDeclarator(first) && isIdentifier(first.id)) {
-        return first.id.name;
-      }
-    }
-    if (decl && isFunctionDeclaration(decl) && decl.id) {
-      return decl.id.name;
-    }
-  }
-  return "UnnamedComponent";
-}
-
-function getFunctionLineCount(fn: Node): number {
-  if (isFunctionDeclaration(fn) || isFunctionExpression(fn) || isArrowFunctionExpression(fn)) {
-    const loc = fn.body.loc;
-    if (loc === null || loc === undefined) {
-      return 0;
-    }
-    return loc.end.line - loc.start.line + 1;
-  }
-  return 0;
-}
-
-const BRANCHING_TYPES = new Set([
-  "IfStatement",
-  "ForStatement",
-  "ForInStatement",
-  "ForOfStatement",
-  "WhileStatement",
-  "DoWhileStatement",
-  "SwitchStatement",
-  "ConditionalExpression",
-  "ArrowFunctionExpression",
-  "FunctionExpression",
-  "TryStatement",
-  "CatchClause",
-]);
-
-function isBranchingNode(node: Node): boolean {
-  return BRANCHING_TYPES.has(node.type);
-}
-
-function walkBody(
-  node: Node,
-  branchingDepth: number,
-  hooks: HookCall[],
-  fetchCalls: FetchCall[],
-  effectCalls: EffectCall[],
-): void {
-  if (isCallExpression(node)) {
-    const callName = getCallName(node);
-    const callObject = getCallObject(node);
-    const line = node.loc?.start.line ?? 0;
-
-    if (callName && isHookCall(callName)) {
-      hooks.push({
-        name: callName,
-        line,
-        isTopLevel: branchingDepth === 0,
-      });
-    }
-
-    if (callName === "useEffect") {
-      effectCalls.push({
-        line,
-        hasDependencyArray: node.arguments.length >= 2,
-      });
-    }
-
-    if (callName === "fetch" && !callObject) {
-      fetchCalls.push({ line, method: "fetch" });
-    }
-
-    if (callObject === "axios" && callName && AXIOS_PROPERTY_METHODS.has(callName)) {
-      fetchCalls.push({ line, method: `axios.${callName}` });
-    }
-  }
-
-  const isBranching = isBranchingNode(node);
-  const nextDepth = isBranching ? branchingDepth + 1 : branchingDepth;
-
-  for (const key of Object.keys(node)) {
-    if (isSkippedKey(key)) {
-      continue;
-    }
-    const value = (node as unknown as Record<string, unknown>)[key];
-    if (Array.isArray(value)) {
-      for (const item of value) {
-        if (item !== null && item !== undefined && typeof item === "object" && "type" in item) {
-          walkBody(item as Node, nextDepth, hooks, fetchCalls, effectCalls);
-        }
-      }
-    } else if (value !== null && value !== undefined && typeof value === "object" && "type" in value) {
-      walkBody(value as Node, nextDepth, hooks, fetchCalls, effectCalls);
-    }
-  }
-}
-
-const SKIPPED_KEYS = new Set([
-  "type",
-  "start",
-  "end",
-  "loc",
-  "leadingComments",
-  "trailingComments",
-  "innerComments",
-]);
-
-function isSkippedKey(key: string): boolean {
-  return SKIPPED_KEYS.has(key);
-}
-
-function isReactComponentCandidate(node: Node): boolean {
-  if (isFunctionDeclaration(node)) {
-    return true;
-  }
-  if (isVariableDeclaration(node)) {
-    return node.declarations.some((decl) => {
-      if (!decl.init) {
-        return false;
-      }
-      return isArrowFunctionExpression(decl.init) || isFunctionExpression(decl.init);
-    });
-  }
-  if (isExportDefaultDeclaration(node)) {
-    return (
-      isFunctionDeclaration(node.declaration) ||
-      isArrowFunctionExpression(node.declaration) ||
-      isFunctionExpression(node.declaration)
-    );
-  }
-  if (isExportNamedDeclaration(node) && node.declaration) {
-    return isReactComponentCandidate(node.declaration);
-  }
-  return false;
-}
+export type { HookCall, FetchCall, EffectCall, ParsedComponent };
 
 function buildParsedComponent(
   name: string,
