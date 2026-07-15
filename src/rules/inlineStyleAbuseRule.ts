@@ -1,24 +1,23 @@
-import type { RuleViolation } from "../types.js";
-import type { InlineStyleUsage } from "../parser/reactComponentParser.js";
+import type { RuleContext, ASTListener } from "../types.js";
 
-const MAX_INLINE_STYLE_PROPERTIES = 3;
-
-export function checkInlineStyleAbuse(
-  componentName: string,
-  inlineStyles: InlineStyleUsage[],
-): RuleViolation[] {
-  const violations: RuleViolation[] = [];
-
-  for (const style of inlineStyles) {
-    if (style.propertyCount > MAX_INLINE_STYLE_PROPERTIES) {
-      violations.push({
-        ruleName: "inline-style-abuse",
-        severity: "warning",
-        line: style.line,
-        message: `Component "${componentName}" exhibits inline style abuse at line ${style.line} (${style.propertyCount} properties). Consider refactoring redundant or complex inline styles into reusable utility classes like Tailwind CSS.`,
-      });
-    }
-  }
-
-  return violations;
+export function registerListeners(context: RuleContext): Record<string, ASTListener[]> {
+  return {
+    "JSXAttribute": [
+      (node: any) => {
+        if (
+          node.name?.name === "style" &&
+          node.value?.type === "JSXExpressionContainer" &&
+          node.value.expression?.type === "ObjectExpression" &&
+          node.value.expression.properties.length > 3
+        ) {
+          context.violations.push({
+            ruleName: "inline-style-abuse",
+            severity: "warning",
+            line: node.loc?.start.line ?? 0,
+            message: `Component "${context.componentName}" exhibits inline style abuse at line ${node.loc?.start.line ?? 0} (${node.value.expression.properties.length} properties). Consider refactoring redundant or complex inline styles into reusable utility classes like Tailwind CSS.`,
+          });
+        }
+      },
+    ],
+  };
 }

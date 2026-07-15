@@ -12,3 +12,11 @@ export interface AnalysisResult {
   issues: RuleViolation[];
   passed: boolean;
 }
+
+export type ASTListener = (node: any) => void;
+
+export interface RuleContext {
+  componentName: string;
+  componentTotalLines: number;
+  violations: RuleViolation[];
+}

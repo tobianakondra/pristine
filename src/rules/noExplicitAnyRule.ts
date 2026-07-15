@@ -1,20 +1,16 @@
-import type { RuleViolation } from "../types.js";
-import type { AnyKeywordUsage } from "../parser/reactComponentParser.js";
+import type { RuleContext, ASTListener } from "../types.js";
 
-export function checkNoExplicitAny(
-  componentName: string,
-  anyKeywords: AnyKeywordUsage[],
-): RuleViolation[] {
-  const violations: RuleViolation[] = [];
-
-  for (const usage of anyKeywords) {
-    violations.push({
-      ruleName: "no-explicit-any",
-      severity: "warning",
-      line: usage.line,
-      message: `Explicit 'any' type used in component "${componentName}" at line ${usage.line}. Prefer a specific type or 'unknown' instead.`,
-    });
-  }
-
-  return violations;
+export function registerListeners(context: RuleContext): Record<string, ASTListener[]> {
+  return {
+    "TSAnyKeyword": [
+      (node: any) => {
+        context.violations.push({
+          ruleName: "no-explicit-any",
+          severity: "warning",
+          line: node.loc?.start.line ?? 0,
+          message: `Explicit 'any' type used in component "${context.componentName}" at line ${node.loc?.start.line ?? 0}. Prefer a specific type or 'unknown' instead.`,
+        });
+      },
+    ],
+  };
 }

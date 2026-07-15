@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { parse } from "@babel/parser";
-import type { File, BlockStatement, Expression, Node } from "@babel/types";
+import type { File, BlockStatement, Expression } from "@babel/types";
 import {
   isExportNamedDeclaration,
   isFunctionDeclaration,
@@ -10,52 +10,41 @@ import {
   isFunctionExpression,
   isBlockStatement,
 } from "@babel/types";
-import type {
-  ParsedComponent,
-  HookCall,
-  FetchCall,
-  EffectCall,
-  AnyKeywordUsage,
-  InlineStyleUsage,
-} from "./astHelpers.js";
 import {
   isReactComponentCandidate,
   isJSXReturningFunction,
   getComponentName,
   getFunctionLineCount,
 } from "./astHelpers.js";
-import { walkBody } from "./bodyExtractor.js";
+import { traverseAST } from "./bodyExtractor.js";
+import type { ASTListener, RuleContext, AnalysisResult, RuleViolation } from "../types.js";
+import { registerListeners as registerComponentLength } from "../rules/componentLengthRule.js";
+import { registerListeners as registerHooksSeparation } from "../rules/hooksSeparationRule.js";
+import { registerListeners as registerInlineFetching } from "../rules/inlineFetchingRule.js";
+import { registerListeners as registerNakedEffect } from "../rules/nakedEffectRule.js";
+import { registerListeners as registerNoExplicitAny } from "../rules/noExplicitAnyRule.js";
+import { registerListeners as registerInlineStyleAbuse } from "../rules/inlineStyleAbuseRule.js";
 
-export type { HookCall, FetchCall, EffectCall, AnyKeywordUsage, InlineStyleUsage, ParsedComponent };
-
-function buildParsedComponent(
-  name: string,
-  functionNode: Node,
-  body: BlockStatement | Expression,
-  hooks: HookCall[],
-  fetchCalls: FetchCall[],
-  effectCalls: EffectCall[],
-  anyKeywords: AnyKeywordUsage[],
-  inlineStyles: InlineStyleUsage[],
-): ParsedComponent {
-  const bodyStartLine = body.loc?.start.line ?? 0;
-  const bodyEndLine = body.loc?.end.line ?? 0;
-  const totalLines = getFunctionLineCount(functionNode);
-
-  return {
-    name,
-    bodyStartLine,
-    bodyEndLine,
-    totalLines,
-    hooks,
-    fetchCalls,
-    effectCalls,
-    anyKeywords,
-    inlineStyles,
-  };
+function mergeListeners(
+  target: Record<string, ASTListener[]>,
+  source: Record<string, ASTListener[]>,
+): void {
+  for (const [nodeType, callbacks] of Object.entries(source)) {
+    if (!target[nodeType]) target[nodeType] = [];
+    target[nodeType].push(...callbacks);
+  }
 }
 
-export function parseReactComponent(filePath: string): ParsedComponent | null {
+const RULE_REGISTRATIONS = [
+  registerComponentLength,
+  registerHooksSeparation,
+  registerInlineFetching,
+  registerNakedEffect,
+  registerNoExplicitAny,
+  registerInlineStyleAbuse,
+];
+
+export function parseReactComponent(filePath: string): AnalysisResult | null {
   let sourceText: string;
   try {
     sourceText = readFileSync(filePath, "utf-8");
@@ -81,22 +70,18 @@ export function parseReactComponent(filePath: string): ParsedComponent | null {
       ? stmt.declaration
       : stmt;
 
-    if (!isReactComponentCandidate(unwrapped)) {
-      continue;
-    }
+    if (!isReactComponentCandidate(unwrapped)) continue;
 
-    let functionNode: Node | undefined;
+    let functionNode: unknown;
     let componentBody: BlockStatement | Expression | undefined;
-    let declarator: Node | undefined;
+    let declarator: unknown;
 
     if (isFunctionDeclaration(unwrapped)) {
       functionNode = unwrapped;
       componentBody = isJSXReturningFunction(unwrapped);
     } else if (isVariableDeclaration(unwrapped)) {
       for (const decl of unwrapped.declarations) {
-        if (!decl.init) {
-          continue;
-        }
+        if (!decl.init) continue;
         if (isArrowFunctionExpression(decl.init) || isFunctionExpression(decl.init)) {
           componentBody = isJSXReturningFunction(decl.init);
           if (componentBody) {
@@ -116,21 +101,36 @@ export function parseReactComponent(filePath: string): ParsedComponent | null {
       }
     }
 
-    if (!functionNode || !componentBody) {
-      continue;
+    if (!functionNode || !componentBody) continue;
+
+    const name = getComponentName(functionNode as any, declarator as any ?? stmt);
+    const totalLines = getFunctionLineCount(functionNode as any);
+
+    const violations: RuleViolation[] = [];
+
+    const context: RuleContext = {
+      componentName: name,
+      componentTotalLines: totalLines,
+      violations,
+    };
+
+    const masterListeners: Record<string, ASTListener[]> = {};
+
+    for (const register of RULE_REGISTRATIONS) {
+      const ruleListeners = register(context);
+      mergeListeners(masterListeners, ruleListeners);
     }
 
-    const name = getComponentName(functionNode, declarator ?? stmt);
-    const hooks: HookCall[] = [];
-    const fetchCalls: FetchCall[] = [];
-    const effectCalls: EffectCall[] = [];
-    const anyKeywords: AnyKeywordUsage[] = [];
-    const inlineStyles: InlineStyleUsage[] = [];
-
     const walkRoot = isBlockStatement(componentBody) ? componentBody : functionNode;
-    walkBody(walkRoot, 0, hooks, fetchCalls, effectCalls, anyKeywords, inlineStyles);
+    traverseAST(walkRoot, masterListeners);
 
-    return buildParsedComponent(name, functionNode, componentBody, hooks, fetchCalls, effectCalls, anyKeywords, inlineStyles);
+    return {
+      filePath,
+      componentName: name,
+      totalLines,
+      issues: violations,
+      passed: violations.length === 0,
+    };
   }
 
   console.error("[Pristine Parser] No React component found in:", filePath);

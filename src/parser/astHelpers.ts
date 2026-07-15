@@ -5,7 +5,6 @@ import {
   isJSXElement,
   isJSXFragment,
   isBlockStatement,
-  isReturnStatement,
   isArrowFunctionExpression,
   isFunctionExpression,
   isFunctionDeclaration,
@@ -14,43 +13,6 @@ import {
   isExportDefaultDeclaration,
   isExportNamedDeclaration,
 } from "@babel/types";
-
-export interface HookCall {
-  name: string;
-  line: number;
-  isTopLevel: boolean;
-}
-
-export interface FetchCall {
-  line: number;
-  method: string;
-}
-
-export interface EffectCall {
-  line: number;
-  hasDependencyArray: boolean;
-}
-
-export interface AnyKeywordUsage {
-  line: number;
-}
-
-export interface InlineStyleUsage {
-  line: number;
-  propertyCount: number;
-}
-
-export interface ParsedComponent {
-  name: string;
-  bodyStartLine: number;
-  bodyEndLine: number;
-  totalLines: number;
-  hooks: HookCall[];
-  fetchCalls: FetchCall[];
-  effectCalls: EffectCall[];
-  anyKeywords: AnyKeywordUsage[];
-  inlineStyles: InlineStyleUsage[];
-}
 
 const HOOK_REGEX = /^use[A-Z]/;
 
