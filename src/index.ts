@@ -19,20 +19,20 @@ server.tool(
       .describe("The absolute or relative path to the React component file."),
   },
   async ({ filePath }) => {
-    const result = parseReactComponent(filePath);
+    const results = parseReactComponent(filePath);
 
-    if (result === null) {
+    if (results.length === 0) {
       return {
         content: [
           {
             type: "text",
-            text: `Could not parse "${filePath}" as a React component. Ensure the file exists, is valid TypeScript/TSX, and exports a function component returning JSX.`,
+            text: `Could not parse "${filePath}" as a React component. Ensure the file exists, is valid TypeScript/TSX, and exports at least one function component returning JSX.`,
           },
         ],
       };
     }
 
-    const formatted = formatAnalysisResult(result);
+    const formatted = results.map(formatAnalysisResult).join("\n");
     return {
       content: [{ type: "text", text: formatted }],
     };

@@ -46,13 +46,13 @@ const RULE_REGISTRATIONS = [
   registerStateFatness,
 ];
 
-export function parseReactComponent(filePath: string): AnalysisResult | null {
+export function parseReactComponent(filePath: string): AnalysisResult[] {
   let sourceText: string;
   try {
     sourceText = readFileSync(filePath, "utf-8");
   } catch (readError: unknown) {
     console.error("[Pristine Parser] Failed to read file:", filePath, readError);
-    return null;
+    return [];
   }
 
   let ast: File;
@@ -64,8 +64,10 @@ export function parseReactComponent(filePath: string): AnalysisResult | null {
   } catch (parseError: unknown) {
     const msg = parseError instanceof Error ? parseError.message : String(parseError);
     console.error("[Pristine Parser] Babel parse error for", filePath, ":", msg);
-    return null;
+    return [];
   }
+
+  const results: AnalysisResult[] = [];
 
   for (const stmt of ast.program.body) {
     const unwrapped = isExportNamedDeclaration(stmt) && stmt.declaration
@@ -131,15 +133,14 @@ export function parseReactComponent(filePath: string): AnalysisResult | null {
       cb();
     }
 
-    return {
+    results.push({
       filePath,
       componentName: name,
       totalLines,
       issues: violations,
       passed: violations.length === 0,
-    };
+    });
   }
 
-  console.error("[Pristine Parser] No React component found in:", filePath);
-  return null;
+  return results;
 }
