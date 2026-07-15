@@ -7,6 +7,7 @@ import { checkHooksSeparation } from "./rules/hooksSeparationRule.js";
 import { checkInlineFetching } from "./rules/inlineFetchingRule.js";
 import { checkNakedEffect } from "./rules/nakedEffectRule.js";
 import { checkNoExplicitAny } from "./rules/noExplicitAnyRule.js";
+import { checkInlineStyleAbuse } from "./rules/inlineStyleAbuseRule.js";
 import type { AnalysisResult, RuleViolation } from "./types.js";
 
 // 1. Initialisation du serveur avec le nouveau McpServer (adieu les warnings !)
@@ -18,7 +19,7 @@ const server = new McpServer({
 // 2. Enregistrement direct et typé de ton outil d'analyse
 server.tool(
   "analyze_react_component",
-  "Analyzes a React component file (.tsx) to check if it complies with core maintainability rules: component length, hooks separation, no inline data fetching, no naked useEffect calls, and no explicit any types.",
+  "Analyzes a React component file (.tsx) to check if it complies with core maintainability rules: component length, hooks separation, no inline data fetching, no naked useEffect calls, no explicit any types, and no inline style abuse (> 3 CSS properties).",
   {
     // Zod valide automatiquement que filePath est bien une chaîne non vide
     filePath: z
@@ -48,6 +49,7 @@ server.tool(
       ...checkInlineFetching(parsed.name, parsed.fetchCalls),
       ...checkNakedEffect(parsed.name, parsed.effectCalls),
       ...checkNoExplicitAny(parsed.name, parsed.anyKeywords),
+      ...checkInlineStyleAbuse(parsed.name, parsed.inlineStyles),
     ];
 
     const result: AnalysisResult = {

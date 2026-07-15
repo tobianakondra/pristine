@@ -1,6 +1,6 @@
 # Analysis Rules Reference
 
-Pristine-MCP currently detects **4 maintainability issues** in React components. Each rule has a severity (`error` or `warning`) and a clear explanation of why it matters.
+Pristine-MCP currently detects **5 maintainability issues** in React components. Each rule has a severity (`error` or `warning`) and a clear explanation of why it matters.
 
 ---
 
@@ -139,6 +139,59 @@ function ProfilePage() {
 
 ---
 
+## 5. Inline Style Abuse (warning)
+
+**Rule name:** `inline-style-abuse`
+
+**What it detects:** JSX elements with more than **3 CSS properties** defined inline via the `style={{...}}` attribute.
+
+**Bad code:**
+```tsx
+function Card() {
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-between",
+        padding: "16px",
+        borderRadius: "8px",
+        background: "#fff",
+      }}
+    >
+      ...
+    </div>
+  );
+}
+```
+
+**Better approach:**
+```tsx
+function Card() {
+  return <div className="card-container">...</div>;
+}
+```
+
+```css
+/* styles.css */
+.card-container {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px;
+  border-radius: 8px;
+  background: #fff;
+}
+```
+
+**Why it matters:** Inline styles bypass the CSS cascade, cannot use media queries or pseudo-classes (`:hover`, `:focus`), increase bundle size, create specificity conflicts, and make the component harder to theme or override. Extracting styles into CSS classes (Tailwind, CSS Modules, or plain CSS) improves reusability, performance, and separation of concerns.
+
+**Threshold:** More than 3 CSS properties in a single `style={{...}}`.
+
+**Severity rationale:** `warning` — inline styles themselves are not a bug, but complex inline styles indicate a missed opportunity to use proper CSS, leading to maintainability issues as the project grows.
+
+---
+
 ## Summary
 
 | Rule | Severity | Detects |
@@ -146,6 +199,7 @@ function ProfilePage() {
 | `hooks-separation` | error | Hooks inside conditions, loops, or nested functions |
 | `naked-effect` | error | `useEffect` without a dependency array |
 | `inline-fetching` | warning | Raw `fetch`/`axios` calls in component body |
+| `inline-style-abuse` | warning | Inline styles with > 3 CSS properties |
 | `component-length` | warning | Components longer than 100 lines |
 
 ## Adding New Rules

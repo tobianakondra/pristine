@@ -16,6 +16,7 @@ import type {
   FetchCall,
   EffectCall,
   AnyKeywordUsage,
+  InlineStyleUsage,
 } from "./astHelpers.js";
 import {
   isReactComponentCandidate,
@@ -25,7 +26,7 @@ import {
 } from "./astHelpers.js";
 import { walkBody } from "./bodyExtractor.js";
 
-export type { HookCall, FetchCall, EffectCall, AnyKeywordUsage, ParsedComponent };
+export type { HookCall, FetchCall, EffectCall, AnyKeywordUsage, InlineStyleUsage, ParsedComponent };
 
 function buildParsedComponent(
   name: string,
@@ -35,6 +36,7 @@ function buildParsedComponent(
   fetchCalls: FetchCall[],
   effectCalls: EffectCall[],
   anyKeywords: AnyKeywordUsage[],
+  inlineStyles: InlineStyleUsage[],
 ): ParsedComponent {
   const bodyStartLine = body.loc?.start.line ?? 0;
   const bodyEndLine = body.loc?.end.line ?? 0;
@@ -49,6 +51,7 @@ function buildParsedComponent(
     fetchCalls,
     effectCalls,
     anyKeywords,
+    inlineStyles,
   };
 }
 
@@ -122,11 +125,12 @@ export function parseReactComponent(filePath: string): ParsedComponent | null {
     const fetchCalls: FetchCall[] = [];
     const effectCalls: EffectCall[] = [];
     const anyKeywords: AnyKeywordUsage[] = [];
+    const inlineStyles: InlineStyleUsage[] = [];
 
     const walkRoot = isBlockStatement(componentBody) ? componentBody : functionNode;
-    walkBody(walkRoot, 0, hooks, fetchCalls, effectCalls, anyKeywords);
+    walkBody(walkRoot, 0, hooks, fetchCalls, effectCalls, anyKeywords, inlineStyles);
 
-    return buildParsedComponent(name, functionNode, componentBody, hooks, fetchCalls, effectCalls, anyKeywords);
+    return buildParsedComponent(name, functionNode, componentBody, hooks, fetchCalls, effectCalls, anyKeywords, inlineStyles);
   }
 
   console.error("[Pristine Parser] No React component found in:", filePath);

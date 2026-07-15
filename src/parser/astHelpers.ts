@@ -35,6 +35,11 @@ export interface AnyKeywordUsage {
   line: number;
 }
 
+export interface InlineStyleUsage {
+  line: number;
+  propertyCount: number;
+}
+
 export interface ParsedComponent {
   name: string;
   bodyStartLine: number;
@@ -44,6 +49,7 @@ export interface ParsedComponent {
   fetchCalls: FetchCall[];
   effectCalls: EffectCall[];
   anyKeywords: AnyKeywordUsage[];
+  inlineStyles: InlineStyleUsage[];
 }
 
 const HOOK_REGEX = /^use[A-Z]/;
