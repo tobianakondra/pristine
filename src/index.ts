@@ -19,6 +19,9 @@ server.tool(
       .describe("The absolute or relative path to the React component file."),
   },
   async ({ filePath }) => {
+    // parseReactComponent returns an array (one entry per component
+    // found in the file). In most cases there will be one, but the
+    // API supports multi-component files without silent skipping.
     const results = parseReactComponent(filePath);
 
     if (results.length === 0) {
@@ -32,6 +35,7 @@ server.tool(
       };
     }
 
+    // Join reports for every component, separated by a blank line.
     const formatted = results.map(formatAnalysisResult).join("\n");
     return {
       content: [{ type: "text", text: formatted }],

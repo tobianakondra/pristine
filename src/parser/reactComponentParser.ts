@@ -46,6 +46,11 @@ const RULE_REGISTRATIONS = [
   registerStateFatness,
 ];
 
+// Returns AnalysisResult[] because a single .tsx file may export
+// multiple components (e.g. a small utility component alongside the
+// main one). Previously we returned after the first component found,
+// silently ignoring the rest. Now we accumulate all components so
+// the caller gets a complete report for the entire file.
 export function parseReactComponent(filePath: string): AnalysisResult[] {
   let sourceText: string;
   try {
@@ -67,6 +72,9 @@ export function parseReactComponent(filePath: string): AnalysisResult[] {
     return [];
   }
 
+  // Accumulate results for every component found in the file.
+  // Previously the loop did `return` on the first valid component,
+  // which skipped any subsequent components in the same file.
   const results: AnalysisResult[] = [];
 
   for (const stmt of ast.program.body) {
@@ -133,6 +141,8 @@ export function parseReactComponent(filePath: string): AnalysisResult[] {
       cb();
     }
 
+    // Push instead of returning — keeps the loop alive for remaining
+    // components in the file.
     results.push({
       filePath,
       componentName: name,
@@ -142,5 +152,8 @@ export function parseReactComponent(filePath: string): AnalysisResult[] {
     });
   }
 
+  // Return all component results to the caller (index.ts).
+  // If no component was found, the array is empty and the caller
+  // shows a "could not parse" message.
   return results;
 }
