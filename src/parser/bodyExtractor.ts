@@ -1,6 +1,6 @@
 import type { Node } from "@babel/types";
 import { isCallExpression } from "@babel/types";
-import type { HookCall, FetchCall, EffectCall } from "./astHelpers.js";
+import type { HookCall, FetchCall, EffectCall, AnyKeywordUsage } from "./astHelpers.js";
 import {
   isHookCall,
   getCallName,
@@ -16,7 +16,13 @@ export function walkBody(
   hooks: HookCall[],
   fetchCalls: FetchCall[],
   effectCalls: EffectCall[],
+  anyKeywords: AnyKeywordUsage[],
 ): void {
+  if (node.type === "TSAnyKeyword") {
+    const line = node.loc?.start.line ?? 0;
+    anyKeywords.push({ line });
+  }
+
   if (isCallExpression(node)) {
     const callName = getCallName(node);
     const callObject = getCallObject(node);
@@ -57,11 +63,11 @@ export function walkBody(
     if (Array.isArray(value)) {
       for (const item of value) {
         if (item !== null && item !== undefined && typeof item === "object" && "type" in item) {
-          walkBody(item as Node, nextDepth, hooks, fetchCalls, effectCalls);
+          walkBody(item as Node, nextDepth, hooks, fetchCalls, effectCalls, anyKeywords);
         }
       }
     } else if (value !== null && value !== undefined && typeof value === "object" && "type" in value) {
-      walkBody(value as Node, nextDepth, hooks, fetchCalls, effectCalls);
+      walkBody(value as Node, nextDepth, hooks, fetchCalls, effectCalls, anyKeywords);
     }
   }
 }

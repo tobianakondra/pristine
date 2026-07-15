@@ -31,6 +31,10 @@ export interface EffectCall {
   hasDependencyArray: boolean;
 }
 
+export interface AnyKeywordUsage {
+  line: number;
+}
+
 export interface ParsedComponent {
   name: string;
   bodyStartLine: number;
@@ -39,6 +43,7 @@ export interface ParsedComponent {
   hooks: HookCall[];
   fetchCalls: FetchCall[];
   effectCalls: EffectCall[];
+  anyKeywords: AnyKeywordUsage[];
 }
 
 const HOOK_REGEX = /^use[A-Z]/;
