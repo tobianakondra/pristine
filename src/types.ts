@@ -19,4 +19,5 @@ export interface RuleContext {
   componentName: string;
   componentTotalLines: number;
   violations: RuleViolation[];
+  onComplete: (() => void)[];
 }

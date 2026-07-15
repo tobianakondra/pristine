@@ -1,6 +1,6 @@
 # Analysis Rules Reference
 
-Pristine-MCP currently detects **5 maintainability issues** in React components. Each rule has a severity (`error` or `warning`) and a clear explanation of why it matters.
+Pristine-MCP currently detects **6 maintainability issues** in React components. Each rule has a severity (`error` or `warning`) and a clear explanation of why it matters.
 
 ---
 
@@ -192,6 +192,45 @@ function Card() {
 
 ---
 
+## 6. State Fatness (warning)
+
+**Rule name:** `state-fatness`
+
+**What it detects:** Components with more than **4 `useState` declarations** in their body.
+
+**Bad code:**
+```tsx
+function HeavyForm() {
+  const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
+  const [age, setAge] = useState(0);
+  const [role, setRole] = useState("user");
+  const [isActive, setIsActive] = useState(false);
+  // 5 useState — too much local state
+  return <form>...</form>;
+}
+```
+
+**Better approach:**
+```tsx
+function HeavyForm() {
+  const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
+  const [age, setAge] = useState(0);
+  // extracted into a custom hook
+  const { role, isActive } = useRoleManagement();
+  return <form>...</form>;
+}
+```
+
+**Why it matters:** Components with many `useState` calls handle too many concerns, violating the **Single Responsibility Principle**. According to *Thinking in React*, state should be distributed across focused sub-components or extracted into custom hooks. Too many local states make the component harder to test, reuse, and reason about.
+
+**Threshold:** More than 4 `useState` calls in a single component.
+
+**Severity rationale:** `warning` — many `useState` calls can work in simple cases, but they indicate a component that is likely doing too much, which will hurt maintainability as the feature grows.
+
+---
+
 ## Summary
 
 | Rule | Severity | Detects |
@@ -200,12 +239,15 @@ function Card() {
 | `naked-effect` | error | `useEffect` without a dependency array |
 | `inline-fetching` | warning | Raw `fetch`/`axios` calls in component body |
 | `inline-style-abuse` | warning | Inline styles with > 3 CSS properties |
+| `state-fatness` | warning | Components with more than 4 `useState` calls |
 | `component-length` | warning | Components longer than 100 lines |
 
 ## Adding New Rules
 
 Each rule is a standalone file in `src/rules/`. To add a new one:
 
-1. Create `src/rules/myRule.ts` exporting a function with signature `(componentName: string, ...data: ...) => RuleViolation[]`
-2. Add the necessary data fields to `ParsedComponent` in `src/parser/reactComponentParser.ts`
-3. Import and call the function in `src/index.ts`
+1. Create `src/rules/myRule.ts` exporting `registerListeners(context: RuleContext): Record<string, ASTListener[]>` that returns AST node type listeners
+2. If the rule needs to act after the AST traversal, push a callback to `context.onComplete`
+3. Import and add the registration function to the `RULE_REGISTRATIONS` array in `src/parser/reactComponentParser.ts`
+
+No other file needs to change — the rule is automatically wired into the pipeline.

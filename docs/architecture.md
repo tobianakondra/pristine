@@ -56,12 +56,14 @@ Each file in this directory implements exactly one maintainability rule. Every r
 | Naked effect | `nakedEffectRule.ts` | error | `CallExpression` (filters `useEffect` without deps) |
 | No explicit any | `noExplicitAnyRule.ts` | warning | `TSAnyKeyword` |
 | Inline style abuse | `inlineStyleAbuseRule.ts` | warning | `JSXAttribute` (filters `name === "style"` with > 3 props) |
+| State fatness | `stateFatnessRule.ts` | warning | `CallExpression` (filters `useState`); reports via `context.onComplete` |
 
 Each rule:
-- Receives a shared `RuleContext` containing `componentName`, `componentTotalLines`, and a `violations[]` array.
+- Receives a shared `RuleContext` containing `componentName`, `componentTotalLines`, `violations[]`, and `onComplete[]`.
 - Returns a map of `{ "NodeType": [listenerFn, ...] }`.
 - Listener functions close over per-rule state (e.g. `depth` counters in `hooksSeparationRule`) and push violations into `context.violations`.
 - Rules that need enter/exit semantics (like `hooksSeparationRule`) register both `"IfStatement"` and `"IfStatement:exit"` pairs.
+- Rules that need to act after the full traversal (e.g. `stateFatnessRule` must finish counting `useState` calls before deciding) push a callback to `context.onComplete`. The orchestrator invokes these callbacks after `traverseAST` returns.
 
 This is directly inspired by ESLint's rule API: each rule declares what AST events it wants, and the orchestrator dispatches them.
 

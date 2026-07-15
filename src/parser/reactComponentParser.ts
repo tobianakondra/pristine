@@ -24,6 +24,7 @@ import { registerListeners as registerInlineFetching } from "../rules/inlineFetc
 import { registerListeners as registerNakedEffect } from "../rules/nakedEffectRule.js";
 import { registerListeners as registerNoExplicitAny } from "../rules/noExplicitAnyRule.js";
 import { registerListeners as registerInlineStyleAbuse } from "../rules/inlineStyleAbuseRule.js";
+import { registerListeners as registerStateFatness } from "../rules/stateFatnessRule.js";
 
 function mergeListeners(
   target: Record<string, ASTListener[]>,
@@ -42,6 +43,7 @@ const RULE_REGISTRATIONS = [
   registerNakedEffect,
   registerNoExplicitAny,
   registerInlineStyleAbuse,
+  registerStateFatness,
 ];
 
 export function parseReactComponent(filePath: string): AnalysisResult | null {
@@ -112,6 +114,7 @@ export function parseReactComponent(filePath: string): AnalysisResult | null {
       componentName: name,
       componentTotalLines: totalLines,
       violations,
+      onComplete: [],
     };
 
     const masterListeners: Record<string, ASTListener[]> = {};
@@ -123,6 +126,10 @@ export function parseReactComponent(filePath: string): AnalysisResult | null {
 
     const walkRoot = isBlockStatement(componentBody) ? componentBody : functionNode;
     traverseAST(walkRoot, masterListeners);
+
+    for (const cb of context.onComplete) {
+      cb();
+    }
 
     return {
       filePath,
