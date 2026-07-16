@@ -25,6 +25,7 @@ import { registerListeners as registerNakedEffect } from "../rules/nakedEffectRu
 import { registerListeners as registerNoExplicitAny } from "../rules/noExplicitAnyRule.js";
 import { registerListeners as registerInlineStyleAbuse } from "../rules/inlineStyleAbuseRule.js";
 import { registerListeners as registerStateFatness } from "../rules/stateFatnessRule.js";
+import { registerListeners as registerNoPropsDrilling } from "../rules/noPropsDrillingRule.js";
 
 function mergeListeners(
   target: Record<string, ASTListener[]>,
@@ -44,6 +45,7 @@ const RULE_REGISTRATIONS = [
   registerNoExplicitAny,
   registerInlineStyleAbuse,
   registerStateFatness,
+  registerNoPropsDrilling,
 ];
 
 // Returns AnalysisResult[] because a single .tsx file may export
@@ -134,6 +136,7 @@ export function parseReactComponent(filePath: string): AnalysisResult[] {
       componentTotalLines: totalLines,
       violations,
       onComplete: [],
+      functionNode,
     };
 
     const masterListeners: Record<string, ASTListener[]> = {};

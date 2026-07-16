@@ -231,6 +231,51 @@ function HeavyForm() {
 
 ---
 
+## 7. No Props Drilling (warning)
+
+**Rule name:** `no-props-drilling`
+
+**What it detects:** Props that a component receives via destructured parameters but **never uses locally** — every reference to the prop is a passthrough to a child component (e.g. `<Child user={user} />`).
+
+**Bad code:**
+```tsx
+function Dashboard({ user, theme }: { user: string; theme: string }) {
+  // `theme` is never used in Dashboard's logic or JSX text
+  const greeting = `Hello ${user}`;           // `user` is used locally ✓
+  return <Child theme={theme} />;             // `theme` drilled through ✗
+}
+```
+
+**Better approach:**
+```tsx
+// Option 1: Use the prop locally before passing it down
+function Dashboard({ user, theme }: { user: string; theme: string }) {
+  const themeClass = `theme-${theme}`;        // Local usage ✓
+  return <Child theme={theme} />;
+}
+```
+
+```tsx
+// Option 2: Consume the context directly in the child
+function Dashboard({ user }: { user: string }) {
+  return <Child />;                           // `theme` obtained via Context in Child
+}
+```
+
+**Why it matters:** Props drilling creates tight coupling between parent and child components and forces intermediate components to be aware of data they don't need. This violates the **Principle of Least Knowledge** (Law of Demeter) and makes refactoring harder — changing a deep prop requires modifying every intermediate component. Use React Context, component composition, or custom hooks to avoid drilling.
+
+**Detection logic:** The rule inspects the component's function parameters (via `functionNode.params` in the AST) to identify all destructured prop variables. It then counts:
+- **Total references**: every time the variable appears as an `Identifier` in the component body
+- **Drilling references**: subset where the variable appears inside a JSX attribute expression (being passed to a child)
+
+If `totalReferences > 0` AND `totalReferences === drillingReferences`, the prop is flagged as drilled.
+
+**Limitation:** Variable shadowing (a local `const user = ...` hiding the prop) cannot be detected at the AST level without full scope analysis. If a prop name is shadowed, local references to the shadowing variable will be counted as prop references, potentially masking a drilling violation.
+
+**Severity rationale:** `warning` — drilling is not a bug, but it signals a design smell that reduces composability and increases maintenance burden.
+
+---
+
 ## Summary
 
 | Rule | Severity | Detects |
@@ -240,6 +285,7 @@ function HeavyForm() {
 | `inline-fetching` | warning | Raw `fetch`/`axios` calls in component body |
 | `inline-style-abuse` | warning | Inline styles with > 3 CSS properties |
 | `state-fatness` | warning | Components with more than 4 `useState` calls |
+| `no-props-drilling` | warning | Props passed to children without local usage |
 | `component-length` | warning | Components longer than 100 lines |
 
 ## Adding New Rules
@@ -248,6 +294,7 @@ Each rule is a standalone file in `src/rules/`. To add a new one:
 
 1. Create `src/rules/myRule.ts` exporting `registerListeners(context: RuleContext): Record<string, ASTListener[]>` that returns AST node type listeners
 2. If the rule needs to act after the AST traversal, push a callback to `context.onComplete`
-3. Import and add the registration function to the `RULE_REGISTRATIONS` array in `src/parser/reactComponentParser.ts`
+3. If the rule needs to inspect the function signature (parameters), access `context.functionNode`
+4. Import and add the registration function to the `RULE_REGISTRATIONS` array in `src/parser/reactComponentParser.ts`
 
 No other file needs to change — the rule is automatically wired into the pipeline.

@@ -22,4 +22,8 @@ export interface RuleContext {
   componentTotalLines: number;
   violations: RuleViolation[];
   onComplete: (() => void)[];
+  /** Reference to the component's function AST node, so rules that need
+   *  parameter inspection (e.g. props-drilling detection) can analyse
+   *  the function signature without changing the walk root. */
+  functionNode: unknown;
 }

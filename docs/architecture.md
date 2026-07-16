@@ -61,6 +61,7 @@ Each file in this directory implements exactly one maintainability rule. Every r
 | No explicit any | `noExplicitAnyRule.ts` | warning | `TSAnyKeyword` |
 | Inline style abuse | `inlineStyleAbuseRule.ts` | warning | `JSXAttribute` (filters `name === "style"` with > 3 props) |
 | State fatness | `stateFatnessRule.ts` | warning | `CallExpression` (filters `useState`); reports via `context.onComplete` |
+| No props drilling | `noPropsDrillingRule.ts` | warning | `Identifier` + `JSXAttribute` (via `functionNode` params); reports via `context.onComplete` |
 
 Each rule:
 - Receives a shared `RuleContext` containing `componentName`, `componentTotalLines`, `violations[]`, and `onComplete[]`.
