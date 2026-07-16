@@ -3,29 +3,58 @@ import { BRANCHING_TYPES } from "../../parser/astHelpers.js";
 import { getMemberRoot } from "./utils.js";
 
 /**
- * Non-idempotent (non-deterministic) patterns that produce different
- * results on every call and therefore break React render purity.
+ * Global-object methods that are non-idempotent.
+ * Map: root object name → Set of method names.
+ *
+ * Each call produces a different value on every invocation and
+ * therefore breaks React render purity.
  */
-const NON_IDEMPOTENT_CALLS = new Map<string, Set<string>>([
+const NON_IDEMPOTENT_MEMBER_CALLS = new Map<string, Set<string>>([
   ["Math", new Set(["random"])],
+  ["Date", new Set(["now"])],
+  ["performance", new Set(["now"])],
+  ["crypto", new Set(["randomUUID", "getRandomValues"])],
 ]);
 
-const NON_IDEMPOTENT_NEW = new Set(["Date"]);
+/**
+ * Standalone function names (identifiers) that are non-idempotent.
+ * These are typically imported from libraries like `uuid` or `nanoid`.
+ */
+const NON_IDEMPOTENT_IDENTIFIER_CALLS = new Set<string>([
+  "uuid",
+  "uuidv4",
+  "nanoid",
+]);
+
+/**
+ * Constructor calls that produce non-idempotent values.
+ */
+const NON_IDEMPOTENT_NEW = new Set<string>(["Date"]);
 
 /**
  * Rule: idempotency
  *
- * Detects non-idempotent expressions (`new Date()`, `Math.random()`)
- * invoked directly in the render body (depth === 0). Calls at depth > 0
- * (inside useEffect callbacks, event handlers, or nested functions) are
- * correctly ignored.
+ * Detects non-idempotent expressions invoked directly in the render
+ * body (depth === 0). Calls at depth > 0 (inside useEffect callbacks,
+ * event handlers, or nested functions) are correctly ignored.
+ *
+ * Detected patterns:
+ *
+ *   MemberExpression calls:
+ *     Math.random()   |   Date.now()   |   performance.now()
+ *     crypto.randomUUID()   |   crypto.getRandomValues()
+ *
+ *   Identifier calls:
+ *     uuid()  |  uuidv4()  |  nanoid()
+ *
+ *   Constructor calls:
+ *     new Date()
  *
  * Why this matters:
- * React assumes the render phase is a pure computation. Expressions like
- * `new Date()` or `Math.random()` produce different values on every call,
- * which causes hydration mismatches in SSR and makes components
- * unpredictable. These should be moved into a `useEffect` or an event
- * handler.
+ * React assumes the render phase is a pure computation. Non-idempotent
+ * expressions produce different values on every call, which causes
+ * hydration mismatches in SSR and makes components unpredictable.
+ * They should be moved into a useEffect or an event handler.
  */
 export function registerListeners(context: RuleContext): Record<string, ASTListener[]> {
   // ── Depth tracking ──────────────────────────────────────────────────
@@ -57,29 +86,48 @@ export function registerListeners(context: RuleContext): Record<string, ASTListe
     },
   ];
 
-  // ── CallExpression:  Math.random()  ────────────────────────────────
+  // ── CallExpression ─────────────────────────────────────────────────
+  //    MemberExpression:  Math.random()  |  Date.now()  |  crypto.randomUUID()
+  //    Identifier:        uuid()  |  nanoid()
+  // ────────────────────────────────────────────────────────────────────
   const existingCall = listeners["CallExpression"];
   const callListeners: ASTListener[] = [
     (node: any) => {
       if (depth !== 0) return;
 
       const callee = node.callee;
-      if (!callee || callee.type !== "MemberExpression") return;
+      if (!callee) return;
 
-      const root = getMemberRoot(callee);
-      const method = callee.property
-        ? (callee.property as Record<string, unknown>).name as string
-        : "";
-      if (!root || !method) return;
+      // ── Case A: Identifier call (e.g. uuid(), nanoid()) ────────────
+      if (callee.type === "Identifier") {
+        if (NON_IDEMPOTENT_IDENTIFIER_CALLS.has(callee.name)) {
+          context.violations.push({
+            ruleName: "react-purity",
+            severity: "warning",
+            line: node.loc?.start.line ?? 0,
+            message: `Non-idempotent expression '${callee.name}()' detected directly in render body. Move this logic to a useEffect or an event handler.`,
+          });
+        }
+        return;
+      }
 
-      const allowedMethods = NON_IDEMPOTENT_CALLS.get(root);
-      if (allowedMethods?.has(method)) {
-        context.violations.push({
-          ruleName: "react-purity",
-          severity: "warning",
-          line: node.loc?.start.line ?? 0,
-          message: `Non-idempotent expression '${root}.${method}()' detected directly in render body. Move this logic to a useEffect or an event handler.`,
-        });
+      // ── Case B: MemberExpression call (e.g. Math.random()) ─────────
+      if (callee.type === "MemberExpression") {
+        const root = getMemberRoot(callee);
+        const method = callee.property
+          ? (callee.property as Record<string, unknown>).name as string
+          : "";
+        if (!root || !method) return;
+
+        const allowedMethods = NON_IDEMPOTENT_MEMBER_CALLS.get(root);
+        if (allowedMethods?.has(method)) {
+          context.violations.push({
+            ruleName: "react-purity",
+            severity: "warning",
+            line: node.loc?.start.line ?? 0,
+            message: `Non-idempotent expression '${root}.${method}()' detected directly in render body. Move this logic to a useEffect or an event handler.`,
+          });
+        }
       }
     },
   ];

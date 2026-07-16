@@ -1,6 +1,6 @@
 # Analysis Rules Reference
 
-Pristine-MCP currently detects **8 maintainability issues** in React components. Each rule has a severity (`error` or `warning`) and a clear explanation of why it matters.
+Pristine-MCP currently detects **8 maintainability issues** (with 3 sub-detections under `react-purity`) in React components. Each rule has a severity (`error` or `warning`) and a clear explanation of why it matters.
 
 ---
 
@@ -334,7 +334,47 @@ Side effects checked at depth 0:
 | Dialogs | `window.alert/confirm/prompt/open/close` |
 | Logging | `console.log/warn/error/info/debug` |
 
-**Severity rationale:** `warning` — mutating props or writing side effects directly in render violates React's core contract. Prop mutations cause hard-to-track bugs (unexpected UI updates), and render-body side effects break the assumption that rendering is a pure transformation, leading to inconsistent state and performance issues.
+### 8c. No Non-Idempotent Expressions
+
+Flags non-idempotent functions and constructors called **directly in the render body** (depth 0). These produce a different value on every invocation and break React's purity contract.
+
+**Bad code:**
+```tsx
+function Impure() {
+  const r = Math.random();              // ← WARNING: non-idempotent
+  const id = crypto.randomUUID();       // ← WARNING: non-idempotent
+  const now = Date.now();               // ← WARNING: non-idempotent
+  const perf = performance.now();       // ← WARNING: non-idempotent
+  const u = uuid();                     // ← WARNING: non-idempotent
+  const d = new Date();                 // ← WARNING: non-idempotent
+  return <div>{r}</div>;
+}
+```
+
+**Good code (moved to `useEffect` or event handler):**
+```tsx
+function Pure() {
+  const [id, setId] = useState("");
+  useEffect(() => {
+    setId(crypto.randomUUID());          // OK: inside useEffect
+  }, []);
+  return <div>{id}</div>;
+}
+```
+
+**Detection scope:**
+
+| Category | Patterns |
+|----------|----------|
+| Member expressions | `Math.random()`, `Date.now()`, `performance.now()`, `crypto.randomUUID()`, `crypto.getRandomValues()` |
+| Standalone identifiers | `uuid()`, `uuidv4()`, `nanoid()` |
+| Constructor calls | `new Date()` |
+
+**Severity rationale:** `warning` — not a runtime error, but it causes hydration mismatches in SSR and makes components unpredictable. The value should be computed inside `useEffect` or an event handler instead.
+
+---
+
+**Severity rationale overall:** `warning` — mutating props or writing side effects directly in render violates React's core contract. Prop mutations cause hard-to-track bugs (unexpected UI updates), and render-body side effects break the assumption that rendering is a pure transformation, leading to inconsistent state and performance issues.
 
 ---
 
@@ -348,7 +388,7 @@ Side effects checked at depth 0:
 | `inline-style-abuse` | warning | Inline styles with > 3 CSS properties |
 | `state-fatness` | warning | Components with more than 4 `useState` calls |
 | `no-props-drilling` | warning | Props passed to children without local usage |
-| `react-purity` | warning | Prop mutations + render-body side effects |
+| `react-purity` | warning | Prop mutations + render-body side effects + non-idempotent expressions |
 | `component-length` | warning | Components longer than 100 lines |
 
 ## Adding New Rules
