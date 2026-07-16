@@ -1,6 +1,6 @@
 # Analysis Rules Reference
 
-Pristine-MCP currently detects **6 maintainability issues** in React components. Each rule has a severity (`error` or `warning`) and a clear explanation of why it matters.
+Pristine-MCP currently detects **8 maintainability issues** in React components. Each rule has a severity (`error` or `warning`) and a clear explanation of why it matters.
 
 ---
 
@@ -276,6 +276,68 @@ If `totalReferences > 0` AND `totalReferences === drillingReferences`, the prop 
 
 ---
 
+## 8. React Purity (warning)
+
+**Rule name:** `react-purity`
+
+**What it detects:** Two sub-detections that enforce React's purity contract:
+
+### 8a. No Prop Mutation
+
+Flags direct assignments to prop variables and mutation method calls (`.push()`, `.splice()`, etc.) on prop objects. React props must always remain read-only.
+
+**Bad code:**
+```tsx
+function Bad({ user, items }: { user: { name: string }; items: string[] }) {
+  user.name = "admin";         // ← WARNING: prop mutation
+  items.push("new-item");      // ← WARNING: mutation via method call
+  return <div>{user.name}</div>;
+}
+```
+
+### 8b. No Render Side Effects
+
+Flags side-effect operations (`localStorage.setItem`, `document.title = ...`, `window.location = ...`, `history.pushState`, `console.log`, etc.) that are invoked **directly in the render body** — not wrapped in a `useEffect`, `useMemo`, event handler, or nested function.
+
+**Bad code:**
+```tsx
+function SideEffects() {
+  document.title = "New Title";              // ← WARNING: side effect at depth 0
+  console.log("rendering");                  // ← WARNING: side effect at depth 0
+  localStorage.setItem("key", "value");      // ← WARNING: side effect at depth 0
+  return <div>Hello</div>;
+}
+```
+
+**Good code (side effects inside useEffect are safe):**
+```tsx
+function Good() {
+  useEffect(() => {
+    document.title = "New Title";            // OK: inside useEffect
+    localStorage.setItem("key", "value");    // OK: inside useEffect
+    console.log("mounted");                  // OK: inside useEffect
+  }, []);
+  return <div>Hello</div>;
+}
+```
+
+**Detection logic:** The rule tracks a `depth` counter incremented on enter of every branching or function AST node and decremented on `:exit`. Side effects are only flagged at depth 0 (the top-level render body). Inside `useEffect` callbacks, arrow function expressions increment depth to > 0, so side effects there are correctly ignored.
+
+Side effects checked at depth 0:
+
+| Category | Patterns |
+|----------|----------|
+| Storage writes | `localStorage.setItem/removeItem/clear`, `sessionStorage.setItem/removeItem/clear` |
+| Document mutations | `document.title = ...` |
+| Navigation | `window.location = ...`, `window.location.href = ...` |
+| Browser history | `history.pushState/replaceState` |
+| Dialogs | `window.alert/confirm/prompt/open/close` |
+| Logging | `console.log/warn/error/info/debug` |
+
+**Severity rationale:** `warning` — mutating props or writing side effects directly in render violates React's core contract. Prop mutations cause hard-to-track bugs (unexpected UI updates), and render-body side effects break the assumption that rendering is a pure transformation, leading to inconsistent state and performance issues.
+
+---
+
 ## Summary
 
 | Rule | Severity | Detects |
@@ -286,6 +348,7 @@ If `totalReferences > 0` AND `totalReferences === drillingReferences`, the prop 
 | `inline-style-abuse` | warning | Inline styles with > 3 CSS properties |
 | `state-fatness` | warning | Components with more than 4 `useState` calls |
 | `no-props-drilling` | warning | Props passed to children without local usage |
+| `react-purity` | warning | Prop mutations + render-body side effects |
 | `component-length` | warning | Components longer than 100 lines |
 
 ## Adding New Rules
