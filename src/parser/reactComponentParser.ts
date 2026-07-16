@@ -24,9 +24,8 @@ import { registerListeners as registerInlineFetching } from "../rules/inlineFetc
 import { registerListeners as registerNakedEffect } from "../rules/nakedEffectRule.js";
 import { registerListeners as registerNoExplicitAny } from "../rules/noExplicitAnyRule.js";
 import { registerListeners as registerInlineStyleAbuse } from "../rules/inlineStyleAbuseRule.js";
-import { registerListeners as registerStateFatness } from "../rules/stateFatnessRule.js";
 import { registerListeners as registerNoPropsDrilling } from "../rules/noPropsDrillingRule.js";
-import { registerListeners as registerReactPurity } from "../rules/reactPurityRule.js";
+import { registerListeners as registerReactPurity } from "../rules/react-purity/index.js";
 
 function mergeListeners(
   target: Record<string, ASTListener[]>,
@@ -45,7 +44,6 @@ const RULE_REGISTRATIONS = [
   registerNakedEffect,
   registerNoExplicitAny,
   registerInlineStyleAbuse,
-  registerStateFatness,
   registerNoPropsDrilling,
   registerReactPurity,
 ];

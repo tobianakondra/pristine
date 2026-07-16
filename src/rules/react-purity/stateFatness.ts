@@ -1,4 +1,4 @@
-import type { RuleContext, ASTListener } from "../types.js";
+import type { RuleContext, ASTListener } from "../../types.js";
 
 const MAX_LOCAL_STATES = 4;
 

@@ -1,5 +1,6 @@
-import type { RuleContext, ASTListener } from "../types.js";
-import { BRANCHING_TYPES } from "../parser/astHelpers.js";
+import type { RuleContext, ASTListener } from "../../types.js";
+import { BRANCHING_TYPES } from "../../parser/astHelpers.js";
+import { registerListeners as registerStateFatness } from "./stateFatness.js";
 
 // ── Constants ────────────────────────────────────────────────────────────
 
@@ -46,7 +47,7 @@ const SIDE_EFFECT_ASSIGNMENTS = new Map<string, Set<string>>([
 
 /**
  * Extract the bound variable names from a function's destructured
- * parameters (same logic as noPropsDrillingRule).
+ * parameters.
  */
 function extractPropNames(functionNode: Record<string, unknown> | undefined): string[] {
   if (!functionNode?.params) return [];
@@ -54,20 +55,17 @@ function extractPropNames(functionNode: Record<string, unknown> | undefined): st
   const params = functionNode.params as Record<string, unknown>[];
 
   for (let param of params) {
-    // Default props: function Foo({...} = defaultProps)
     if (param.type === "AssignmentPattern") {
       param = param.left as Record<string, unknown>;
     }
 
     if (param.type !== "ObjectPattern" && param.type !== "Identifier") continue;
 
-    // Undestructured single param: function Foo(props)
     if (param.type === "Identifier") {
       names.push(param.name as string);
       continue;
     }
 
-    // Destructured ObjectPattern
     const properties = param.properties as Record<string, unknown>[] | undefined;
     if (!properties) continue;
 
@@ -96,7 +94,6 @@ function extractPropNames(functionNode: Record<string, unknown> | undefined): st
  *
  *   a.b.c     →  "a"
  *   foo.bar   →  "foo"
- *   props     →  "props"   (simple Identifier, not a member)
  */
 function getMemberRoot(node: Record<string, unknown>): string | null {
   let current = node;
@@ -109,23 +106,16 @@ function getMemberRoot(node: Record<string, unknown>): string | null {
 /**
  * Check whether the left-hand side of an AssignmentExpression is a
  * mutation of a prop variable.  Returns the prop name if so, else null.
- *
- * Matches:
- *   name = value             (direct destructured prop)
- *   props.name = value       (undestructured props)
- *   user.name = value        (nested member on a destructured prop)
  */
 function checkPropMutation(
   left: Record<string, unknown>,
   propNames: Set<string>,
   hasPropsParam: boolean,
 ): string | null {
-  // Direct assignment to a destructured prop variable
   if (left.type === "Identifier" && propNames.has(left.name as string)) {
     return left.name as string;
   }
 
-  // Assignment to a member of a prop (e.g. props.name = ..., user.age = ...)
   if (left.type === "MemberExpression") {
     const root = getMemberRoot(left);
     if (root && propNames.has(root)) return root;
@@ -139,16 +129,8 @@ function checkPropMutation(
 
 /**
  * Check whether a MemberExpression callee is a side-effect call.
- *
- * Matches:
- *   localStorage.setItem(...)
- *   history.pushState(...)
- *   window.alert(...)
- *   console.log(...)
  */
-function isSideEffectCall(
-  callee: Record<string, unknown>,
-): boolean {
+function isSideEffectCall(callee: Record<string, unknown>): boolean {
   if (callee.type !== "MemberExpression") return false;
   const root = getMemberRoot(callee);
   const method = callee.property
@@ -163,21 +145,13 @@ function isSideEffectCall(
 /**
  * Check whether the left-hand side of an AssignmentExpression is a
  * side-effect write to a global object property.
- *
- * Matches:
- *   document.title = ...
- *   window.location = ...
- *   window.location.href = ...
  */
-function isSideEffectAssignment(
-  left: Record<string, unknown>,
-): boolean {
+function isSideEffectAssignment(left: Record<string, unknown>): boolean {
   if (left.type !== "MemberExpression") return false;
   const root = getMemberRoot(left);
 
   if (!root) return false;
 
-  // Build the property path (e.g. "title", "location", "location.href")
   const parts: string[] = [];
   let current: Record<string, unknown> = left;
   while (current.type === "MemberExpression") {
@@ -193,22 +167,31 @@ function isSideEffectAssignment(
   return allowedProps !== undefined && allowedProps.has(propPath);
 }
 
-// ── Rule ─────────────────────────────────────────────────────────────────
+// ── Merge helper ─────────────────────────────────────────────────────────
+
+function mergeListeners(
+  target: Record<string, ASTListener[]>,
+  source: Record<string, ASTListener[]>,
+): void {
+  for (const [nodeType, callbacks] of Object.entries(source)) {
+    if (!target[nodeType]) target[nodeType] = [];
+    target[nodeType].push(...callbacks);
+  }
+}
+
+// ── Rule entry point ─────────────────────────────────────────────────────
 
 /**
  * Rule: react-purity
  *
- * Two sub-detections that enforce React's purity contract:
+ * Combines multiple sub-detections that enforce React's purity contract:
  *
- * 1. **No prop mutation** — flags any AssignmentExpression or mutation
- *    method call (push, splice, etc.) that modifies a prop variable.
- *    React props must always remain read-only.
- *
- * 2. **No render side effects** — flags side-effect operations
- *    (localStorage, document.title assignment, history.pushState,
- *     window.location, console.log, etc.) that are invoked directly
- *    in the component body outside useEffect, useMemo, useCallback,
- *    event handlers, or nested functions.
+ * 1. **State fatness** (sub-rule) — warns when a component uses > 4 `useState`
+ * 2. **No prop mutation** — flags any AssignmentExpression or mutation method
+ *    call (push, splice, etc.) that modifies a prop variable.
+ * 3. **No render side effects** — flags side-effect operations (localStorage,
+ *    document.title, window.location, history.pushState, console.log, etc.)
+ *    invoked directly in the component body outside useEffect/event handlers.
  *
  * Depth tracking is used to determine whether a CallExpression or
  * AssignmentExpression sits at the top level of the render body
@@ -216,23 +199,23 @@ function isSideEffectAssignment(
  * side effects are acceptable (depth > 0).
  */
 export function registerListeners(context: RuleContext): Record<string, ASTListener[]> {
+  // ── Merge sub-rule listeners ─────────────────────────────────────────
+  const listeners: Record<string, ASTListener[]> = {};
+
+  // 1. State fatness: counts useState calls, reports via onComplete
+  mergeListeners(listeners, registerStateFatness(context));
+
+  // ── Setup for prop mutation + render side effects ────────────────────
   const functionNode = context.functionNode as Record<string, unknown> | undefined;
   const rawNames = extractPropNames(functionNode);
 
-  // If there is a plain `props` parameter (not destructured), we also
-  // track mutations on `props.*` and `props.method()`.
   const hasPropsParam = (functionNode?.params as Record<string, unknown>[] | undefined)
     ?.some((p) => p.type === "Identifier" && p.name === "props") ?? false;
 
-  // Deduplicated set of prop variable names for O(1) lookups.
   const propNames = new Set(rawNames);
 
   // ── Depth tracking ──────────────────────────────────────────────────
-  // We use a `depth` counter incremented on enter of every branching
-  // or function construct and decremented on exit. Side effects are
-  // only flagged at depth 0 (directly in the render body).
   let depth = 0;
-  const listeners: Record<string, ASTListener[]> = {};
 
   for (const type of BRANCHING_TYPES) {
     if (!listeners[type]) listeners[type] = [];
@@ -243,9 +226,9 @@ export function registerListeners(context: RuleContext): Record<string, ASTListe
   }
 
   // ── AssignmentExpression listener ──────────────────────────────────
-  // Triggers on:  prop = value  |  props.name = value  |  user.name = value
-  //               document.title = value  |  window.location = value
+  const existingAssignment = listeners["AssignmentExpression"] || [];
   listeners["AssignmentExpression"] = [
+    ...existingAssignment,
     (node: any) => {
       const left = node.left;
       if (!left) return;
@@ -275,10 +258,9 @@ export function registerListeners(context: RuleContext): Record<string, ASTListe
   ];
 
   // ── CallExpression listener ────────────────────────────────────────
-  // Triggers on:  props.items.push(...)  |  localStorage.setItem(...)
-  //              history.pushState(...)  |  window.alert(...)
-  //              console.log(...)
+  const existingCall = listeners["CallExpression"] || [];
   listeners["CallExpression"] = [
+    ...existingCall,
     (node: any) => {
       const callee = node.callee;
       if (!callee || callee.type !== "MemberExpression") return;
