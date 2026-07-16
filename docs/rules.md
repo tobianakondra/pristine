@@ -1,6 +1,6 @@
 # Analysis Rules Reference
 
-Pristine-MCP currently detects **8 maintainability issues** (with 3 sub-detections under `react-purity`) in React components. Each rule has a severity (`error` or `warning`) and a clear explanation of why it matters.
+Pristine-MCP currently detects **8 maintainability issues** (with 5 sub-detections under `react-purity`) in React components. Each rule has a severity (`error` or `warning`) and a clear explanation of why it matters.
 
 ---
 
@@ -374,6 +374,112 @@ function Pure() {
 
 ---
 
+### 8d. Post-JSX Immutability
+
+Flags assignments and mutation method calls (`.push()`, `.splice()`, etc.) on variables that have **already been passed as props to a JSX element** earlier in the same render body. React props must remain immutable once passed.
+
+**Bad code:**
+```tsx
+function Bad() {
+  const user = { name: "Alice" };
+  const items = [1, 2, 3];
+  return (
+    <div>
+      <Profile user={user} />              {/* user passed at line 5 */}
+      <List data={items} />                {/* items passed at line 6 */}
+      {user.name = "Bob"}                  {/* ← WARNING: mutation after JSX */}
+      {items.push(4)}                      {/* ← WARNING: mutation after JSX */}
+    </div>
+  );
+}
+```
+
+```tsx
+function BadConditional() {
+  const user = { name: "Alice" };
+  if (someCondition) {
+    return <Profile user={user} />;        {/* user passed at line 4 */}
+  }
+  user.name = "Bob";                       {/* ← WARNING: mutation after JSX */}
+  return <div>{user.name}</div>;
+}
+```
+
+**Good code (assign before passing to JSX):**
+```tsx
+function Good() {
+  const user = { name: "Alice" };
+  const items = [1, 2, 3];
+  items.push(4);                            // OK: mutation before JSX
+  return (
+    <div>
+      <Profile user={user} />
+      <List data={items} />
+    </div>
+  );
+}
+```
+
+**Detection logic:**
+- `jsxVariables` Map records a variable name → line number the first time it appears inside a `JSXExpressionContainer` (e.g. `style={myVar}`).
+- `AssignmentExpression` and `CallExpression` at depth 0 check their target variable against the Map. If the current line is **strictly greater** than the JSX line, a violation fires.
+
+| Category | Patterns |
+|----------|----------|
+| Direct assignment | `user.name = ...`, `obj.attr = ...` |
+| Mutation methods | `.push()`, `.pop()`, `.splice()`, `.shift()`, `.unshift()`, `.reverse()`, `.sort()`, `.fill()`, `.copyWithin()` |
+
+**Severity rationale:** `warning` — mutating a variable after it has been injected into JSX breaks React's immutability contract and can cause subtle UI bugs where child components render stale or inconsistent data.
+
+---
+
+### 8e. Out-of-Scope Mutation
+
+Flags mutations (assignments, increment/decrement, and mutative method calls) on variables that are **not declared locally** in the component function — i.e. globals, module-level variables, and imports. In React, the render phase must be a pure computation with no side effects on external state.
+
+**Bad code:**
+```tsx
+let renderCount = 0;
+const globalArray: string[] = [];
+
+function Bad() {
+  renderCount++;                       // ← WARNING: out-of-scope mutation
+  globalArray.push("x");               // ← WARNING: out-of-scope mutation
+  globalArray[0] = "y";                // ← WARNING: out-of-scope mutation
+  return <div>{renderCount}</div>;
+}
+```
+
+**Good code (all mutations use local variables):**
+```tsx
+function Good() {
+  const [count, setCount] = useState(0);
+  const localArray: string[] = [];
+  localArray.push("x");                // OK: local variable
+  return <div>{count}</div>;
+}
+```
+
+**Detection logic:**
+
+The rule pre-scans `context.functionNode` to build a `Set` of locally declared variable names:
+
+- **Function parameters** — plain `Identifier` (`props`), destructured `ObjectPattern` (`{ id, theme }`), and `AssignmentPattern` defaults (`props = {}`)
+- **Variable declarators** — `Identifier`, `ObjectPattern` destructuring, and `ArrayPattern` destructuring (for hooks like `const [state, setState] = useState(...)`)
+- **Nested function declarations** — e.g. `function handleClick() {}` inside the component
+
+At traversal time, these listeners fire only at `depth === 0`:
+
+| Listener | Target | Detection |
+|----------|--------|-----------|
+| `AssignmentExpression` | `left` side root | `target = value` or `target.x = value` on non-local |
+| `UpdateExpression` | `argument` root | `target++`, `++target`, `--target` on non-local |
+| `CallExpression` | method on non-local root | `.push()`, `.pop()`, `.splice()`, `.shift()`, `.unshift()`, `.reverse()`, `.sort()`, `.fill()`, `.copyWithin()` |
+
+**Severity rationale:** `warning` — mutating external state during render breaks React's purity contract. Such mutations cause inconsistent UI, make components unpredictable in concurrent rendering, and are a common source of hard-to-find bugs.
+
+---
+
 **Severity rationale overall:** `warning` — mutating props or writing side effects directly in render violates React's core contract. Prop mutations cause hard-to-track bugs (unexpected UI updates), and render-body side effects break the assumption that rendering is a pure transformation, leading to inconsistent state and performance issues.
 
 ---
@@ -388,7 +494,7 @@ function Pure() {
 | `inline-style-abuse` | warning | Inline styles with > 3 CSS properties |
 | `state-fatness` | warning | Components with more than 4 `useState` calls |
 | `no-props-drilling` | warning | Props passed to children without local usage |
-| `react-purity` | warning | Prop mutations + render-body side effects + non-idempotent expressions |
+| `react-purity` | warning | Prop mutations + render-body side effects + non-idempotent expressions + post-JSX mutations + out-of-scope mutations |
 | `component-length` | warning | Components longer than 100 lines |
 
 ## Adding New Rules
