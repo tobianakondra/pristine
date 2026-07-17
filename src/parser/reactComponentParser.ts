@@ -19,7 +19,6 @@ import {
 import { traverseAST } from "./bodyExtractor.js";
 import type { ASTListener, RuleContext, AnalysisResult, RuleViolation } from "../types.js";
 import { registerListeners as registerComponentLength } from "../rules/componentLengthRule.js";
-import { registerListeners as registerHooksSeparation } from "../rules/hooksSeparationRule.js";
 import { registerListeners as registerInlineFetching } from "../rules/inlineFetchingRule.js";
 import { registerListeners as registerNakedEffect } from "../rules/nakedEffectRule.js";
 import { registerListeners as registerNoExplicitAny } from "../rules/noExplicitAnyRule.js";
@@ -27,6 +26,7 @@ import { registerListeners as registerInlineStyleAbuse } from "../rules/inlineSt
 import { registerListeners as registerNoPropsDrilling } from "../rules/noPropsDrillingRule.js";
 import { registerListeners as registerReactPurity } from "../rules/react-purity/index.js";
 import { registerListeners as registerReactCalls } from "../rules/reactCalls/index.js";
+import { registerListeners as registerRulesOfHooks } from "../rules/rulesOfHooks/index.js";
 
 function mergeListeners(
   target: Record<string, ASTListener[]>,
@@ -40,7 +40,6 @@ function mergeListeners(
 
 const RULE_REGISTRATIONS = [
   registerComponentLength,
-  registerHooksSeparation,
   registerInlineFetching,
   registerNakedEffect,
   registerNoExplicitAny,
@@ -48,6 +47,7 @@ const RULE_REGISTRATIONS = [
   registerNoPropsDrilling,
   registerReactPurity,
   registerReactCalls,
+  registerRulesOfHooks,
 ];
 
 // Returns AnalysisResult[] because a single .tsx file may export
@@ -197,8 +197,39 @@ export function parseReactComponent(filePath: string): AnalysisResult[] {
     });
   }
 
-  // Return all component results to the caller (index.ts).
-  // If no component was found, the array is empty and the caller
-  // shows a "could not parse" message.
+  // ── File-level pass: catch hooks outside component bodies ───────────
+  // rules-of-hooks-context violations in non-component utility functions
+  // (e.g. lowercase-named helpers calling hooks) are not captured by the
+  // component-body walk above.  Walk the entire program AST with the
+  // rulesOfHooks rule to find them.
+  {
+    const fileViolations: RuleViolation[] = [];
+    const fileContext: RuleContext = {
+      componentName: "(file-level)",
+      componentTotalLines: sourceText.split("\n").length,
+      violations: fileViolations,
+      onComplete: [],
+      functionNode: undefined,
+    };
+
+    const fileListeners = registerRulesOfHooks(fileContext);
+    traverseAST(ast, fileListeners);
+
+    for (const cb of fileContext.onComplete) {
+      cb();
+    }
+
+    if (fileViolations.length > 0) {
+      results.push({
+        filePath,
+        componentName: "(file-level)",
+        totalLines: sourceText.split("\n").length,
+        issues: fileViolations,
+        passed: false,
+        dependencies: [],
+      });
+    }
+  }
+
   return results;
 }

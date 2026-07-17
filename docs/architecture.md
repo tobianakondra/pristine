@@ -28,7 +28,7 @@ src/
                               returns AnalysisResult[] (one per component, with JSX dependencies)
   rules/                — Individual maintainability rules
     componentLengthRule.ts  — Component line-count limit (> 100 → warning)
-    hooksSeparationRule.ts  — Hooks inside conditions/loops → error
+    rulesOfHooks/index.ts    — Rules of Hooks (conditional + context) → error
     inlineFetchingRule.ts   — Raw fetch/axios calls in component body → warning
     nakedEffectRule.ts      — useEffect without dependency array → error
     noExplicitAnyRule.ts    — Explicit `any` type usage → warning
@@ -55,7 +55,7 @@ Each file in this directory implements exactly one maintainability rule. Every r
 | Rule | File | Severity | Listens to |
 |------|------|----------|-----------|
 | Component length | `componentLengthRule.ts` | warning | _(no AST — fires during registration if totalLines > 100)_ |
-| Hooks separation | `hooksSeparationRule.ts` | error | `IfStatement`, `ForStatement`, etc. (enter/exit for depth) + `CallExpression` |
+| Rules of Hooks | `rulesOfHooks/index.ts` | error | `CallExpression` (hook filter) + conditionalDepth/functionDepth tracking |
 | Inline fetching | `inlineFetchingRule.ts` | warning | `CallExpression` (filters `fetch` / `axios.*`) |
 | Naked effect | `nakedEffectRule.ts` | error | `CallExpression` (filters `useEffect` without deps) |
 | No explicit any | `noExplicitAnyRule.ts` | warning | `TSAnyKeyword` |
@@ -66,8 +66,8 @@ Each file in this directory implements exactly one maintainability rule. Every r
 Each rule:
 - Receives a shared `RuleContext` containing `componentName`, `componentTotalLines`, `violations[]`, and `onComplete[]`.
 - Returns a map of `{ "NodeType": [listenerFn, ...] }`.
-- Listener functions close over per-rule state (e.g. `depth` counters in `hooksSeparationRule`) and push violations into `context.violations`.
-- Rules that need enter/exit semantics (like `hooksSeparationRule`) register both `"IfStatement"` and `"IfStatement:exit"` pairs.
+- Listener functions close over per-rule state (e.g. `conditionalDepth`/`functionDepth` counters in `rulesOfHooks`) and push violations into `context.violations`.
+- Rules that need enter/exit semantics (like `rulesOfHooks`) register both `"IfStatement"` and `"IfStatement:exit"` pairs.
 - Rules that need to act after the full traversal (e.g. `stateFatnessRule` must finish counting `useState` calls before deciding) push a callback to `context.onComplete`. The orchestrator invokes these callbacks after `traverseAST` returns.
 
 This is directly inspired by ESLint's rule API: each rule declares what AST events it wants, and the orchestrator dispatches them.

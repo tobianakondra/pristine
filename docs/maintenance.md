@@ -16,7 +16,7 @@ This Model Context Protocol (MCP) server analyzes React (`.tsx`) files to check 
 │   │   └── reactComponentParser.ts  # Orchestrator: reads file, parses, detects component, returns ParsedComponent
 │   └── rules/                   # Individual validation rules
 │       ├── componentLengthRule.ts   # Component line-count limit (> 100 lines → warning)
-│       ├── hooksSeparationRule.ts   # Hooks inside conditions/loops → error
+│       ├── rulesOfHooks/            # Rules of Hooks (conditional + context) → error
 │       ├── inlineFetchingRule.ts    # Raw fetch/axios calls in component body → warning
 │       └── nakedEffectRule.ts       # useEffect without dependency array → error
 ├── package.json

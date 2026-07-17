@@ -4,11 +4,15 @@ Pristine-MCP currently detects **9 maintainability issues** (with 5 sub-detectio
 
 ---
 
-## 1. Hooks Separation (error)
+## 1. Rules of Hooks (error)
 
-**Rule name:** `hooks-separation`
+**Rule names:** `rules-of-hooks-conditional`, `rules-of-hooks-context`
 
-**What it detects:** React hooks (`useState`, `useEffect`, `useCallback`, `useMemo`, `useRef`, `useContext`, etc.) called inside conditions, loops, or nested functions.
+**What it detects:** Two complementary checks that enforce the [Rules of Hooks](https://react.dev/reference/rules/rules-of-hooks):
+
+### 1a. Not Inside Conditionals, Loops, or Nested Functions (`rules-of-hooks-conditional`)
+
+Flags hook calls (`useState`, `useEffect`, etc.) that have a **conditional/loop ancestor** (`IfStatement`, `ForStatement`, `WhileStatement`, `SwitchStatement`, `ConditionalExpression`, `TryStatement`, `CatchClause`) or a **nested function ancestor** (`FunctionDeclaration`, `FunctionExpression`, `ArrowFunctionExpression`) inside the component body.
 
 **Bad code:**
 ```tsx
@@ -16,7 +20,7 @@ function UserProfile() {
   const [name, setName] = useState("");
 
   if (name === "") {
-    useEffect(() => {          // ← ERROR: hook inside condition
+    useEffect(() => {          // ← ERROR: hook inside conditional
       document.title = "Empty";
     }, []);
   }
@@ -26,14 +30,56 @@ function UserProfile() {
   }
 
   const handler = () => {
-    useState(false);           // ← ERROR: hook inside nested function
+    useState(false);           // ← ERROR: hook inside nested callback
   };
+
+  function inner() {
+    useState(null);            // ← ERROR: hook inside nested function
+  }
 }
 ```
 
-**Why it matters:** React relies on the **order** of hook calls being identical between renders. When hooks are placed inside conditions or loops, the order can change between renders, causing React to mismanage state and produce subtle, hard-to-debug bugs. This is [Rule #1 of the Rules of Hooks](https://react.dev/reference/rules/rules-of-hooks).
+### 1b. Valid Component / Hook Context (`rules-of-hooks-context`)
 
-**Severity rationale:** `error` — violating this rule breaks React's internal state management and almost always leads to runtime bugs.
+Flags hook calls inside functions whose name **does not start with an uppercase letter** (component convention) **or the `use` prefix** (custom hook convention). This catches hooks called from utility helpers, event handlers, or any non-React context. A full-program scan ensures no hook call in the file goes undetected, even in non-component functions.
+
+**Bad code:**
+```tsx
+function formatUserData(user) {
+  useState(null);               // ← ERROR: not a component or hook
+  return user;
+}
+
+function fetchHelper() {
+  useEffect(() => {             // ← ERROR: not a component or hook
+    fetch("/api/data");
+  }, []);
+}
+```
+
+**Good code:**
+```tsx
+function MyComponent() {        // ← uppercase: component ✓
+  const [val, setVal] = useState(0);
+  useEffect(() => {}, []);
+  return <div />;
+}
+
+function useAuth() {            // ← "use" prefix: custom hook ✓
+  const [user, setUser] = useState(null);
+  useEffect(() => {}, []);
+  return user;
+}
+```
+
+**Detection logic (conditionalDepth + functionDepth):**
+- `conditionalDepth` — incremented on enter of conditional/loop/try/catch nodes, decremented on exit
+- `functionDepth` — incremented on enter of function nodes, decremented on exit
+- Check (1a) fires when `conditionalDepth > 0` OR (`isComponentWalk` AND `functionDepth > 0`)
+- Check (1b) fires when the nearest named function ancestor does not match `/^[A-Z]/` or `/^use[A-Z]/`
+- Full-program walk (with `skipStack`): when `functionNode` is undefined, the rule walks the entire AST and skips hook calls inside valid components/custom hooks to avoid duplicates with component-body passes
+
+**Severity rationale:** `error` — violating either rule breaks React's internal state management and leads to runtime bugs.
 
 ---
 
@@ -560,7 +606,7 @@ function App() {
 
 | Rule | Severity | Detects |
 |------|----------|---------|
-| `hooks-separation` | error | Hooks inside conditions, loops, or nested functions |
+| `rules-of-hooks` | error | Hooks inside conditionals/loops/nested functions + hooks in non-component context |
 | `naked-effect` | error | `useEffect` without a dependency array |
 | `react-calls` | error | Components called as functions + hooks referenced as values |
 | `inline-fetching` | warning | Raw `fetch`/`axios` calls in component body |
