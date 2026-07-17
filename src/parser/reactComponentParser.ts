@@ -26,6 +26,7 @@ import { registerListeners as registerNoExplicitAny } from "../rules/noExplicitA
 import { registerListeners as registerInlineStyleAbuse } from "../rules/inlineStyleAbuseRule.js";
 import { registerListeners as registerNoPropsDrilling } from "../rules/noPropsDrillingRule.js";
 import { registerListeners as registerReactPurity } from "../rules/react-purity/index.js";
+import { registerListeners as registerReactCalls } from "../rules/reactCalls/index.js";
 
 function mergeListeners(
   target: Record<string, ASTListener[]>,
@@ -46,6 +47,7 @@ const RULE_REGISTRATIONS = [
   registerInlineStyleAbuse,
   registerNoPropsDrilling,
   registerReactPurity,
+  registerReactCalls,
 ];
 
 // Returns AnalysisResult[] because a single .tsx file may export

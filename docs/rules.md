@@ -1,6 +1,6 @@
 # Analysis Rules Reference
 
-Pristine-MCP currently detects **8 maintainability issues** (with 5 sub-detections under `react-purity`) in React components. Each rule has a severity (`error` or `warning`) and a clear explanation of why it matters.
+Pristine-MCP currently detects **9 maintainability issues** (with 5 sub-detections under `react-purity`) in React components. Each rule has a severity (`error` or `warning`) and a clear explanation of why it matters.
 
 ---
 
@@ -484,12 +484,85 @@ At traversal time, these listeners fire only at `depth === 0`:
 
 ---
 
+## 9. React Calls (error)
+
+**Rule name:** `react-calls`
+
+**What it detects:** Two violations related to how React components and Hooks are invoked:
+
+### 9a. Components Called as Functions
+
+Flags `CallExpression` nodes where the callee is an uppercase-starting identifier (React component convention) used as a plain function. Components must be instantiated with JSX syntax, not called directly.
+
+**Bad code:**
+```tsx
+function App() {
+  const menu = Menu();              // ← ERROR: called as function
+  const footer = Footer();          // ← ERROR: called as function
+  return <div>{menu}{footer}</div>;
+}
+```
+
+**Good code:**
+```tsx
+function App() {
+  return (
+    <div>
+      <Menu />
+      <Footer />
+    </div>
+  );
+}
+```
+
+Native constructors (`Array()`, `Map()`, `Set()`, `Date()`, `Error()`, `Promise()`, `RegExp()`, `Object()`, etc.) are excluded from this detection.
+
+### 9b. Hooks Referenced as Values
+
+Flags `Identifier` nodes matching the hook naming convention (`use` + uppercase, e.g. `useState`, `useEffect`) that are **not immediately called** — i.e. used as a value reference instead of invoked as a function.
+
+**Bad code:**
+```tsx
+function App() {
+  const myHook = useState;          // ← ERROR: referenced but not called
+  return <div />;
+}
+```
+
+```tsx
+function App() {
+  return <div>{useState}</div>;     // ← ERROR: referenced but not called
+}
+```
+
+**Good code:**
+```tsx
+function App() {
+  const [value, setValue] = useState(0);  // OK: properly called
+  useEffect(() => {                       // OK: properly called
+    console.log(value);
+  }, [value]);
+  return <div>{value}</div>;
+}
+```
+
+**Detection logic:** A `pendingHookCallee` flag is set to `true` when entering a `CallExpression` whose callee (or `MemberExpression` property) matches the hook naming convention. The flag is consumed by the first hook-matching `Identifier` visited — which is always the callee itself. Any subsequent hook-matching `Identifier` encountered (in arguments or elsewhere) while the flag is `false` triggers a violation. This correctly handles:
+- `useState(0)` → valid (flag consumed by callee)
+- `React.useState(0)` → valid (flag consumed by MemberExpression property)
+- `const fn = useState` → violation (flag never set)
+- `useEffect(useCallback, [])` → violation on `useCallback` (passed as value, not called)
+
+**Severity rationale:** `error` — calling a component as a function instead of using JSX skips React's reconciliation logic and can cause subtle rendering bugs. Using hooks as values (instead of calling them) violates the Rules of Hooks and leads to state management bugs and unpredictable component behavior.
+
+---
+
 ## Summary
 
 | Rule | Severity | Detects |
 |------|----------|---------|
 | `hooks-separation` | error | Hooks inside conditions, loops, or nested functions |
 | `naked-effect` | error | `useEffect` without a dependency array |
+| `react-calls` | error | Components called as functions + hooks referenced as values |
 | `inline-fetching` | warning | Raw `fetch`/`axios` calls in component body |
 | `inline-style-abuse` | warning | Inline styles with > 3 CSS properties |
 | `state-fatness` | warning | Components with more than 4 `useState` calls |
