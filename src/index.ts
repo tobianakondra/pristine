@@ -3,6 +3,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 import { parseReactComponent } from "./parser/reactComponentParser.js";
 import { findTsFiles } from "./utils/fileFinder.js";
+import { registerAnalyzerTool } from "./tools/analyzer.js";
 import { registerThinkingPrompt } from "./prompts/thinkingInReact.js";
 import type { AnalysisResult } from "./types.js";
 
@@ -297,6 +298,7 @@ function buildComponentTree(allResults: AnalysisResult[]): string {
   return treeLines.join("\n");
 }
 
+registerAnalyzerTool(server);
 registerThinkingPrompt(server);
 
 async function main(): Promise<void> {
