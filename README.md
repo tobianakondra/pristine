@@ -61,7 +61,7 @@ Designed for **AI agents** (Claude, opencode, Cursor, Kiro), Pristine-MCP plugs 
 
 ---
 
-## The 11 Golden Rules
+## The 12 Golden Rules
 
 | # | Rule | Severity | Description |
 |---|------|----------|-------------|
@@ -76,6 +76,7 @@ Designed for **AI agents** (Claude, opencode, Cursor, Kiro), Pristine-MCP plugs 
 | 9 | **component-length** | `warning` | Components exceeding 100 lines — extract sub-components or custom hooks. |
 | 10 | **rsc-server-hooks** | `error` | React Hooks (`useState`, `useEffect`, etc.) called in a file without the `"use client"` directive — Server Components cannot use state or effects. |
 | 11 | **rsc-browser-apis** | `error` | Browser APIs (`window`, `document`, `localStorage`) accessed in a Server Component — these globals do not exist on the server. |
+| 12 | **rsc-serializable-props** | `error` | Event handlers (`onClick`, `onChange`, etc.) or inline functions passed as props from a Server Component — functions cannot cross the network boundary. |
 
 ---
 
@@ -168,9 +169,58 @@ Add to `~/.kiro/settings/mcp.json`:
 }
 ```
 
-### Cursor / Claude Desktop / Any MCP Client
+### Cursor
 
-Use the standard MCP configuration format for your client, pointing `command` + `args` to the pristine server entry point.
+Add to `.cursor/mcp.json` in your project root:
+
+```json
+{
+  "mcpServers": {
+    "pristine": {
+      "command": "node",
+      "args": ["/path/to/pristine/dist/index.js"]
+    }
+  }
+}
+```
+
+Then restart Cursor. The `analyze_react_file`, `analyze_react_component`, and `analyze_project_folder` tools appear in the tool list. When you ask Cursor to write or fix a React component, it can call pristine to validate the result.
+
+### Claude Code
+
+Add to `~/.claude/settings.json` (global) or `.claude/settings.json` (project):
+
+```json
+{
+  "mcpServers": {
+    "pristine": {
+      "command": "node",
+      "args": ["/path/to/pristine/dist/index.js"]
+    }
+  }
+}
+```
+
+Then restart Claude Code. The MCP tools are available for Claude to invoke during the conversation.
+
+### Claude Desktop
+
+Add to `claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "pristine": {
+      "command": "node",
+      "args": ["/path/to/pristine/dist/index.js"]
+    }
+  }
+}
+```
+
+### Any MCP Client
+
+Use the standard MCP configuration format, pointing `command` + `args` to the pristine server entry point (`dist/index.js` after build).
 
 ---
 

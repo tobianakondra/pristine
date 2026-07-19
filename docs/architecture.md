@@ -72,13 +72,14 @@ Each rule exports `registerListeners(context: RuleContext): Record<string, ASTLi
 | `rulesOfHooks/index.ts` | modular | error | 2 (conditional, context) |
 | `rsc/rscServerHooksRule.ts` | flat | error | — |
 | `rsc/rscBrowserApisRule.ts` | flat | error | — |
+| `rsc/rscSerializablePropsRule.ts` | flat | error | — |
 
 Architecture patterns:
 - **Self-contained state:** Each rule creates per-file closure state (counters, depth trackers) inside `registerListeners`.
 - **Enter/exit pairs:** Rules that track nesting (conditional depth, function depth) register both `"NodeType"` and `"NodeType:exit"`.
 - **Post-traversal hooks:** Rules that need to act after the walk (e.g. `stateFatness`, `noPropsDrilling`) push callbacks to `context.onComplete[]`.
 - **File-level pass:** `rulesOfHooks` runs a full-program AST walk with `skipStack` to avoid duplicating violations already caught in component bodies.
-- **RSC rules:** Both RSC rules (`rscServerHooksRule`, `rscBrowserApisRule`) receive `isClientComponent` as a second parameter (file-level context). They are wired manually (not via `RULE_REGISTRATIONS`) because their signatures differ.
+- **RSC rules:** All three RSC rules (`rscServerHooksRule`, `rscBrowserApisRule`, `rscSerializablePropsRule`) receive `isClientComponent` as a second parameter (file-level context). They are wired manually (not via `RULE_REGISTRATIONS`) because their signatures differ.
 
 ### `src/prompts/` — MCP Prompts
 

@@ -701,6 +701,83 @@ Both listeners are skipped entirely when the file has a `"use client"` directive
 
 ---
 
+## 12. RSC Serializable Props (error)
+
+**Rule name:** `rsc-serializable-props`
+
+**What it detects:** Event handlers (props starting with `on`, like `onClick`, `onChange`) and inline function expressions passed as JSX attributes from a Server Component — a file without the `"use client"` directive.
+
+### Background
+
+In the React Server Components architecture, props passed from a Server Component to a Client Component must be **serializable** — they are serialized to JSON and sent over the network. Functions cannot be serialized. This means:
+
+- Event handler props (`onClick`, `onSubmit`, etc.) — always functions — cannot be passed from Server Components.
+- Inline arrow functions or `function` expressions in prop values cannot be passed either.
+
+The function must be defined inside a Client Component, or the component receiving the prop must itself be a Client Component.
+
+### Bad code
+
+```tsx
+// No "use client" — this is a Server Component
+function ServerPage() {
+  return (
+    <ClientButton onClick={() => console.log('Clicked!')} />   // ← ERROR
+  );
+}
+```
+
+```tsx
+function ServerPage() {
+  const handleClick = () => console.log('Clicked!');
+  return (
+    <ClientButton onClick={handleClick} />                      // ← ERROR
+  );
+}
+```
+
+### Good code
+
+```tsx
+"use client";
+
+function ClientPage() {
+  return (
+    <ClientButton onClick={() => console.log('Clicked!')} />   // OK
+  );
+}
+```
+
+Or define the handler inside the Client Component itself:
+
+```tsx
+"use client";
+
+function ClientButton() {
+  return <button onClick={() => console.log('Clicked!')}>Click</button>;
+}
+```
+
+### Detection logic
+
+The rule registers a `JSXAttribute` listener that fires for every attribute on a JSX element. For each attribute:
+
+1. **Check 1 — `on` prefix:** If the attribute name starts with `"on"` (e.g. `onClick`, `onChange`, `onSubmit`), the prop is flagged as non-serializable. React event handlers are always functions.
+
+2. **Check 2 — Inline function expression:** If the attribute value is a `JSXExpressionContainer` wrapping an `ArrowFunctionExpression` or `FunctionExpression`, the prop is flagged.
+
+Both checks are skipped when `isClientComponent === true` (file has `"use client"`).
+
+### Why not flag `Identifier` references?
+
+A prop value like `<Child renderItem={renderFn} />` might be a function reference, but it could also be data (`<Child items={items} />`). Without type information, we cannot distinguish at the AST level. The `on`-prefix check covers the common case (event handlers are always functions), and the inline function check covers anonymous functions. Named function references passed as non-`on` props require a type-aware linter.
+
+### Severity rationale
+
+`error` — passing a function from a Server to a Client Component causes a runtime error during serialization. React throws an error like "Functions cannot be passed directly to Client Components."
+
+---
+
 ## Summary
 
 | Rule | Severity | Detects |
@@ -710,6 +787,7 @@ Both listeners are skipped entirely when the file has a `"use client"` directive
 | `react-calls` | error | Components called as functions + hooks referenced as values |
 | `rsc-server-hooks` | error | Hook calls in files without `"use client"` directive (Server Components) |
 | `rsc-browser-apis` | error | Browser APIs (`window`, `document`, `localStorage`) in Server Components |
+| `rsc-serializable-props` | error | Event handlers and inline functions passed as props from Server Components |
 | `inline-fetching` | warning | Raw `fetch`/`axios` calls in component body |
 | `inline-style-abuse` | warning | Inline styles with > 3 CSS properties |
 | `state-fatness` | warning | Components with more than 4 `useState` calls |

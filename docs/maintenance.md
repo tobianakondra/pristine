@@ -24,7 +24,7 @@ pristine/
 │   │   ├── noPropsDrillingRule.ts     # Props passthrough → warning
 │   │   ├── reactCalls/                # Components as functions + hooks as values → error
 │   │   ├── react-purity/              # 5 sub-detections → warning
-│   │   ├── rsc/                       # rsc-server-hooks + rsc-browser-apis → error
+│   │   ├── rsc/                       # 3 RSC rules (hooks, browser-apis, serializable-props) → error
 │   │   └── rulesOfHooks/              # Conditional + context → error
 │   └── utils/
 │       └── fileFinder.ts              # findTsFiles() recursive walker
