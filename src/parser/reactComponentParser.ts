@@ -27,6 +27,7 @@ import { registerListeners as registerNoPropsDrilling } from "../rules/noPropsDr
 import { registerListeners as registerReactPurity } from "../rules/react-purity/index.js";
 import { registerListeners as registerReactCalls } from "../rules/reactCalls/index.js";
 import { registerListeners as registerRulesOfHooks } from "../rules/rulesOfHooks/index.js";
+import { registerListeners as registerRscServerHooks } from "../rules/rsc/rscServerHooksRule.js";
 
 function mergeListeners(
   target: Record<string, ASTListener[]>,
@@ -75,6 +76,12 @@ export function parseReactComponent(filePath: string): AnalysisResult[] {
     console.error("[Pristine Parser] Babel parse error for", filePath, ":", msg);
     return [];
   }
+
+  // ── Detect "use client" directive (RSC boundary) ──────────────────
+  const isClientComponent =
+    ast.program.directives?.some(
+      (d: any) => d.value?.value === "use client",
+    ) ?? false;
 
   // Accumulate results for every component found in the file.
   // Previously the loop did `return` on the first valid component,
@@ -147,6 +154,9 @@ export function parseReactComponent(filePath: string): AnalysisResult[] {
       const ruleListeners = register(context);
       mergeListeners(masterListeners, ruleListeners);
     }
+
+    // RSC rule — flag hooks in Server Components
+    mergeListeners(masterListeners, registerRscServerHooks(context, isClientComponent));
 
     /**
      * Inline listener that fires on every JSX opening element tag.

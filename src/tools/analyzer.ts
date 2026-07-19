@@ -34,7 +34,7 @@ export function registerAnalyzerTool(server: McpServer): void {
       let responseText = formatted;
       if (hasViolations) {
         responseText +=
-          `\n\n⚠️ Des violations ont été détectées par l'analyseur d'AST. Tu dois obligatoirement corriger le fichier pour éliminer ces erreurs.`;
+          `\n\n⚠️ AST analysis detected violations. You must fix the file to eliminate these errors before proceeding.`;
       }
 
       return {

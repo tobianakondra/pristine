@@ -61,7 +61,7 @@ Designed for **AI agents** (Claude, opencode, Cursor, Kiro), Pristine-MCP plugs 
 
 ---
 
-## The 9 Golden Rules
+## The 10 Golden Rules
 
 | # | Rule | Severity | Description |
 |---|------|----------|-------------|
@@ -74,6 +74,7 @@ Designed for **AI agents** (Claude, opencode, Cursor, Kiro), Pristine-MCP plugs 
 | 7 | **no-props-drilling** | `warning` | Props received but never used locally — every reference is a passthrough to a child. Use Context, composition, or custom hooks instead. |
 | 8 | **react-purity** | `warning` | Zero side effects, mutations, or non-idempotent expressions in the render body (5 sub-detections: prop mutation, render side effects, non-idempotent, post-JSX mutation, out-of-scope mutation). |
 | 9 | **component-length** | `warning` | Components exceeding 100 lines — extract sub-components or custom hooks. |
+| 10 | **rsc-server-hooks** | `error` | React Hooks (`useState`, `useEffect`, etc.) called in a file without the `"use client"` directive — Server Components cannot use state or effects. |
 
 ---
 
@@ -219,9 +220,11 @@ npm test
 
 Tests use **Vitest** and run against isolated rule modules, parsing inline code strings with the same Babel parser used in production.
 
-There are currently **36+ tests** across 2 test files covering:
-- `react-calls` — 19 tests (components called as functions, hooks referenced as values)
-- `rules-of-hooks` — 17 tests (conditional depth, function depth, full-program file-level scan)
+There are currently **72 tests** across 4 test files covering:
+- `react-calls` — components called as functions, hooks referenced as values
+- `rules-of-hooks` — conditional depth, function depth, full-program file-level scan
+- React purity sub-rules — prop mutation, side effects, idempotency, immutability, out-of-scope mutation
+- Server Component RSC rule — `"use client"` directive enforcement
 
 ---
 
@@ -245,6 +248,7 @@ pristine/
 │   │   ├── nakedEffectRule.ts         # useEffect without deps → error
 │   │   ├── noExplicitAnyRule.ts       # TSAnyKeyword → warning
 │   │   ├── noPropsDrillingRule.ts     # Props passed to children without local usage → warning
+│   │   ├── rsc/                       # Server Component rules (rsc-server-hooks)
 │   │   ├── reactCalls/                # Components as functions + hooks as values → error
 │   │   ├── react-purity/              # 5 sub-detections → warning
 │   │   └── rulesOfHooks/              # Conditional/context → error
@@ -274,6 +278,7 @@ pristine/
 - **Multi-Component Files**: `parseReactComponent` returns `AnalysisResult[]` — every exported component in the file is analyzed, not just the first one found.
 - **Full-Program Scan**: `rules-of-hooks` uses a skip-stack mechanism to walk the entire file AST once and catch hook calls in non-component utility functions without duplicating component-body violations.
 - **Props Drilling Detection**: Compares total references of a destructured prop to references in JSX attributes. If 100% are passthrough → violation.
+- **RSC Boundary Detection**: Scans `ast.program.directives` for `"use client"` at file level; if absent, every hook call (`use*`) in component bodies is flagged as a Server Component violation.
 
 ---
 

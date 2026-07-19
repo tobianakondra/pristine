@@ -602,13 +602,62 @@ function App() {
 
 ---
 
-## Summary
+## 10. RSC Server Hooks (error)
+
+**Rule name:** `rsc-server-hooks`
+
+**What it detects:** React Hooks (`useState`, `useEffect`, `useRef`, and any custom hook matching `/^use[A-Z]/`) called inside a **Server Component** — a component defined in a file that does **not** have the `"use client"` directive at the top.
+
+### Background
+
+In the React Server Components (RSC) architecture, only **Client Components** can use state, effects, browser APIs, or any interactive features. Server Components run exclusively on the server and must be pure — they cannot use hooks.
+
+### Bad code
+
+```tsx
+// No "use client" directive — this is a Server Component
+function UserProfile({ userId }: { userId: string }) {
+  const [user, setUser] = useState(null);       // ← ERROR
+  useEffect(() => {                              // ← ERROR
+    fetch(`/api/users/${userId}`).then(setUser);
+  }, [userId]);
+  return <div>{user?.name}</div>;
+}
+```
+
+### Good code
+
+```tsx
+"use client";
+
+function UserProfile({ userId }: { userId: string }) {
+  const [user, setUser] = useState(null);       // OK
+  useEffect(() => {                              // OK
+    fetch(`/api/users/${userId}`).then(setUser);
+  }, [userId]);
+  return <div>{user?.name}</div>;
+}
+```
+
+### Detection logic
+
+1. After parsing the file AST, the parser checks `ast.program.directives` for a `DirectiveLiteral` matching `"use client"`.
+2. If the directive is **present**, the file is treated as a Client Component and no RSC violations are reported.
+3. If the directive is **absent**, every `CallExpression` whose callee matches `/^use[A-Z]/` (detected by `isHookCall()`) is flagged as a violation.
+4. The rule is wired into the **component-body walk** only (not the file-level pass), avoiding duplicate violations.
+
+### Severity rationale
+
+`error` — using hooks in a Server Component is a runtime error. React will throw during rendering, and the component will fail to render entirely. This is not a style concern but a hard architectural constraint of the RSC model.
+
+---
 
 | Rule | Severity | Detects |
 |------|----------|---------|
 | `rules-of-hooks` | error | Hooks inside conditionals/loops/nested functions + hooks in non-component context |
 | `naked-effect` | error | `useEffect` without a dependency array |
 | `react-calls` | error | Components called as functions + hooks referenced as values |
+| `rsc-server-hooks` | error | Hook calls in files without `"use client"` directive (Server Components) |
 | `inline-fetching` | warning | Raw `fetch`/`axios` calls in component body |
 | `inline-style-abuse` | warning | Inline styles with > 3 CSS properties |
 | `state-fatness` | warning | Components with more than 4 `useState` calls |

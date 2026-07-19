@@ -1,95 +1,147 @@
 # Pristine MCP — Maintenance Guide
 
-This Model Context Protocol (MCP) server analyzes React (`.tsx`) files to check compliance with core code maintainability rules.
-
----
-
 ## Project Structure
 
-```text
-├── src/
-│   ├── index.ts                 # Entry point, McpServer instance, tool declarations
-│   ├── types.ts                 # Shared types for analysis and violations
-│   ├── parser/
-│   │   ├── astHelpers.ts        # Pure Babel detection helpers + shared types (HookCall, FetchCall, EffectCall, ParsedComponent)
-│   │   ├── bodyExtractor.ts     # Recursive AST walk to collect hooks, fetches, and effects
-│   │   └── reactComponentParser.ts  # Orchestrator: reads file, parses, detects component, returns ParsedComponent
-│   └── rules/                   # Individual validation rules
-│       ├── componentLengthRule.ts   # Component line-count limit (> 100 lines → warning)
-│       ├── rulesOfHooks/            # Rules of Hooks (conditional + context) → error
-│       ├── inlineFetchingRule.ts    # Raw fetch/axios calls in component body → warning
-│       └── nakedEffectRule.ts       # useEffect without dependency array → error
-├── package.json
-└── tsconfig.json
 ```
-
----
+pristine/
+├── src/
+│   ├── index.ts                       # McpServer entry point, tool/prompt wiring
+│   ├── types.ts                       # RuleViolation, AnalysisResult, ASTListener, RuleContext
+│   ├── parser/
+│   │   ├── astHelpers.ts              # Pure Babel detection helpers (isHookCall, getComponentName, etc.)
+│   │   ├── bodyExtractor.ts           # Generic traverseAST(node, listeners) with enter/:exit
+│   │   └── reactComponentParser.ts    # Orchestrator: parse → components → rules → walk → AnalysisResult[]
+│   ├── prompts/
+│   │   └── thinkingInReact.ts         # brainstorm-react prompt
+│   ├── tools/
+│   │   └── analyzer.ts                # analyze_react_file tool
+│   ├── rules/
+│   │   ├── componentLengthRule.ts     # > 100 lines → warning
+│   │   ├── inlineFetchingRule.ts      # fetch/axios in render → warning
+│   │   ├── inlineStyleAbuseRule.ts    # style={{...}} with > 3 props → warning
+│   │   ├── nakedEffectRule.ts         # useEffect without deps → error
+│   │   ├── noExplicitAnyRule.ts       # TSAnyKeyword → warning
+│   │   ├── noPropsDrillingRule.ts     # Props passthrough → warning
+│   │   ├── reactCalls/                # Components as functions + hooks as values → error
+│   │   ├── react-purity/              # 5 sub-detections → warning
+│   │   ├── rsc/                       # rsc-server-hooks → error
+│   │   └── rulesOfHooks/              # Conditional + context → error
+│   └── utils/
+│       └── fileFinder.ts              # findTsFiles() recursive walker
+├── docs/
+│   ├── architecture.md
+│   ├── maintenance.md
+│   ├── parser-fixes.md
+│   ├── rules.md
+│   ├── security.md
+│   └── thinking-in-react.md
+├── package.json
+├── tsconfig.json
+└── README.md
+```
 
 ## Technical Architecture
 
-### 1. MCP Server & Validation (`src/index.ts`)
+### 1. MCP Server (`src/index.ts`)
 
-The server uses the modern **`McpServer`** class from the MCP SDK.
-
-- **Input validation:** Handled robustly by **Zod** directly in the tool declaration.
-- **Tool declaration:** Tools are registered via `server.tool(...)`. No more verbose JSON schemas or separate routing files.
+- Uses `McpServer` from `@modelcontextprotocol/sdk`
+- Declares tools via `server.tool()` (inline or from `src/tools/` modules)
+- Declares prompts via `server.prompt()` (from `src/prompts/` modules)
+- Connects via `StdioServerTransport` (JSON-RPC over stdin/stdout)
+- Input validation via **Zod** schemas
 
 ### 2. AST Parser (`src/parser/` — 3 files)
 
-The parser layer was split into three files to keep each under 200 lines and independently maintainable:
-
 | File | Role |
 |------|------|
-| `astHelpers.ts` | Pure Babel AST detection functions (`hasJSXDeep`, `isReactComponentCandidate`, `getComponentName`, `isHookCall`) + exported types (`HookCall`, `FetchCall`, `EffectCall`, `ParsedComponent`). Contains no I/O. |
-| `bodyExtractor.ts` | Recursive `walkBody` that traverses a component's AST subtree to collect hook calls (with nesting level), API calls (`fetch`/`axios`), and `useEffect` calls (with or without dependency array). |
-| `reactComponentParser.ts` | Thin orchestrator: reads the file, parses it with `@babel/parser`, uses `astHelpers` to find a React component, delegates body extraction to `bodyExtractor`, and returns a `ParsedComponent`. Re-exports all types for consumers. |
+| `astHelpers.ts` | Pure Babel AST detection functions — no I/O, no orchestration, stateless |
+| `bodyExtractor.ts` | `traverseAST(node, listeners)`: generic recursive walker with enter/`:exit` support |
+| `reactComponentParser.ts` | Orchestrator: reads file, parses with Babel (typescript + jsx plugins), detects `"use client"` directive, iterates components, merges rule listeners, walks AST, runs file-level pass, returns `AnalysisResult[]` |
 
-- **JSX detection:** Uses a deep recursive search (`hasJSXDeep`) in `astHelpers.ts` to determine whether a function returns JSX, avoiding false negatives from conditional structures (`if/else`), ternary expressions, or intermediate variables.
-- **Tree walk (`walkBody`):** In `bodyExtractor.ts`, recursively analyzes the component body to catalog hooks (with their nesting level), API calls (fetch/axios), and effects (with dependency array status).
+### 3. Rules Engine (`src/rules/`)
 
----
+- Each rule exports `registerListeners(context: RuleContext): Record<string, ASTListener[]>`
+- Rules with sub-detections live in subdirectories (e.g. `react-purity/index.ts` merges 5 sub-rules)
+- Most rules are auto-wired via `RULE_REGISTRATIONS` array in `reactComponentParser.ts`
+- The RSC rule (`rsc/rscServerHooksRule.ts`) has a different signature (`registerListeners(context, isClientComponent)`) and is wired manually alongside it
 
-## Maintenance Guide: How to Evolve the Project
+### 4. MCP Tools (`src/tools/`)
 
-### How to Add a New MCP Tool
+Dedicated modules for tool registration, keeping `src/index.ts` clean. Each exports a `register*Tool(server: McpServer)` function.
 
-Declare it directly in `src/index.ts` using `server.tool`:
+### 5. MCP Prompts (`src/prompts/`)
 
-```typescript
-import { z } from "zod";
+Same pattern as tools — each exports a `register*Prompt(server: McpServer)` function.
 
-server.tool(
-  "my_new_tool",
-  "Clear description of what the tool does.",
-  {
-    myParameter: z.string().describe("Description of the parameter."),
-  },
-  async ({ myParameter }) => {
-    // Business logic here...
-    return {
-      content: [{ type: "text", text: "Result" }],
-    };
-  }
-);
-```
+## How to Add a New Rule
 
-### How to Add a New Component Analysis Rule
+1. Create `src/rules/myRule.ts` exporting:
+   ```ts
+   export function registerListeners(
+     context: RuleContext
+   ): Record<string, ASTListener[]>
+   ```
+2. If the rule needs post-traversal logic, push callbacks to `context.onComplete`.
+3. If the rule needs to inspect function parameters, read `context.functionNode`.
+4. Import and add the registration function to `RULE_REGISTRATIONS` in `src/parser/reactComponentParser.ts:42`.
 
-1. **Extend the parser** (if the rule needs new data):
-   - Add a new interface in `src/parser/astHelpers.ts`
-   - Add a new array to `ParsedComponent`
-   - Collect the data in `src/parser/bodyExtractor.ts` during the `walkBody` traversal
+**If the rule needs file-level context** (like `isClientComponent`):
+- Accept a second parameter in `registerListeners`
+- Wire it manually in `reactComponentParser.ts` (see `registerRscServerHooks` for the pattern)
+- Do NOT add it to `RULE_REGISTRATIONS`
 
-2. **Create the rule:** Add a new file in `src/rules/myNewRuleRule.ts`. Your function should accept parsed component data and return an array of `RuleViolation`.
+## How to Add a New MCP Tool
 
-3. **Wire it up:** Import your function in `src/index.ts` and add its results to the `issues` array when the analysis tool executes.
+1. Create `src/tools/myTool.ts`:
+   ```ts
+   import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+   import { z } from "zod";
 
----
+   export function registerMyTool(server: McpServer): void {
+     server.tool("my_tool", "Description", {
+       param: z.string().describe("..."),
+     }, async ({ param }) => {
+       // Logic
+       return { content: [{ type: "text", text: "result" }] };
+     });
+   }
+   ```
+2. Import and call `registerMyTool(server)` in `src/index.ts`.
+
+## How to Add a New MCP Prompt
+
+1. Create `src/prompts/myPrompt.ts`:
+   ```ts
+   import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+   import { z } from "zod";
+
+   export function registerMyPrompt(server: McpServer): void {
+     server.prompt("my-prompt", "Description", {
+       arg: z.string().describe("..."),
+     }, ({ arg }) => ({
+       messages: [{ role: "user", content: { type: "text", text: "..." } }],
+     }));
+   }
+   ```
+2. Import and call `registerMyPrompt(server)` in `src/index.ts`.
 
 ## Local Debugging
 
-To test the server locally during development, use the MCP Inspector:
-
 ```bash
+# Inspector web UI (http://localhost:5173) — test tools and prompts manually
 npx @modelcontextprotocol/inspector npx tsx src/index.ts
+
+# Headless (for agent integration)
+npm run dev
 ```
+
+## Key Conventions
+
+- **TypeScript strict mode** + `verbatimModuleSyntax` + `noUncheckedIndexedAccess`
+- **ESM** — all local imports use `.js` extensions, `import type` for type-only imports
+- **No `any`** — use proper interfaces from `src/types.ts` or `@babel/types`
+- **Self-contained rules** — each rule owns its state via closure inside `registerListeners`
+- **Visitor pattern** — rules declare AST events, orchestrator dispatches
+- **Multi-component support** — `parseReactComponent` returns `AnalysisResult[]`, not a single result
+- **File-level pass** — full-program AST walk for `rulesOfHooks` with cycle-safe `skipStack`
+- **Auto-lint instructions** — `~/.config/opencode/instructions/pristine.md` forces AI to call `analyze_react_file` after every `.tsx` edit
