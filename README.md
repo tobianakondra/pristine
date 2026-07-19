@@ -61,7 +61,7 @@ Designed for **AI agents** (Claude, opencode, Cursor, Kiro), Pristine-MCP plugs 
 
 ---
 
-## The 10 Golden Rules
+## The 11 Golden Rules
 
 | # | Rule | Severity | Description |
 |---|------|----------|-------------|
@@ -75,6 +75,7 @@ Designed for **AI agents** (Claude, opencode, Cursor, Kiro), Pristine-MCP plugs 
 | 8 | **react-purity** | `warning` | Zero side effects, mutations, or non-idempotent expressions in the render body (5 sub-detections: prop mutation, render side effects, non-idempotent, post-JSX mutation, out-of-scope mutation). |
 | 9 | **component-length** | `warning` | Components exceeding 100 lines — extract sub-components or custom hooks. |
 | 10 | **rsc-server-hooks** | `error` | React Hooks (`useState`, `useEffect`, etc.) called in a file without the `"use client"` directive — Server Components cannot use state or effects. |
+| 11 | **rsc-browser-apis** | `error` | Browser APIs (`window`, `document`, `localStorage`) accessed in a Server Component — these globals do not exist on the server. |
 
 ---
 
@@ -224,7 +225,7 @@ There are currently **72 tests** across 4 test files covering:
 - `react-calls` — components called as functions, hooks referenced as values
 - `rules-of-hooks` — conditional depth, function depth, full-program file-level scan
 - React purity sub-rules — prop mutation, side effects, idempotency, immutability, out-of-scope mutation
-- Server Component RSC rule — `"use client"` directive enforcement
+- Server Component RSC rules — hooks (`useState`/`useEffect`), browser APIs (`window`/`document`/`localStorage`)
 
 ---
 

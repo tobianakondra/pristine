@@ -24,7 +24,7 @@ pristine/
 │   │   ├── noPropsDrillingRule.ts     # Props passthrough → warning
 │   │   ├── reactCalls/                # Components as functions + hooks as values → error
 │   │   ├── react-purity/              # 5 sub-detections → warning
-│   │   ├── rsc/                       # rsc-server-hooks → error
+│   │   ├── rsc/                       # rsc-server-hooks + rsc-browser-apis → error
 │   │   └── rulesOfHooks/              # Conditional + context → error
 │   └── utils/
 │       └── fileFinder.ts              # findTsFiles() recursive walker
@@ -63,7 +63,7 @@ pristine/
 - Each rule exports `registerListeners(context: RuleContext): Record<string, ASTListener[]>`
 - Rules with sub-detections live in subdirectories (e.g. `react-purity/index.ts` merges 5 sub-rules)
 - Most rules are auto-wired via `RULE_REGISTRATIONS` array in `reactComponentParser.ts`
-- The RSC rule (`rsc/rscServerHooksRule.ts`) has a different signature (`registerListeners(context, isClientComponent)`) and is wired manually alongside it
+- RSC rules (`rsc/rscServerHooksRule.ts`, `rsc/rscBrowserApisRule.ts`) have a different signature (`registerListeners(context, isClientComponent)`) and are wired manually alongside `RULE_REGISTRATIONS`
 
 ### 4. MCP Tools (`src/tools/`)
 

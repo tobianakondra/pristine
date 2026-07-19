@@ -28,6 +28,7 @@ import { registerListeners as registerReactPurity } from "../rules/react-purity/
 import { registerListeners as registerReactCalls } from "../rules/reactCalls/index.js";
 import { registerListeners as registerRulesOfHooks } from "../rules/rulesOfHooks/index.js";
 import { registerListeners as registerRscServerHooks } from "../rules/rsc/rscServerHooksRule.js";
+import { registerListeners as registerRscBrowserApis } from "../rules/rsc/rscBrowserApisRule.js";
 
 function mergeListeners(
   target: Record<string, ASTListener[]>,
@@ -155,8 +156,9 @@ export function parseReactComponent(filePath: string): AnalysisResult[] {
       mergeListeners(masterListeners, ruleListeners);
     }
 
-    // RSC rule — flag hooks in Server Components
+    // RSC rules — flag hooks and browser APIs in Server Components
     mergeListeners(masterListeners, registerRscServerHooks(context, isClientComponent));
+    mergeListeners(masterListeners, registerRscBrowserApis(context, isClientComponent));
 
     /**
      * Inline listener that fires on every JSX opening element tag.

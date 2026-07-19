@@ -652,12 +652,64 @@ function UserProfile({ userId }: { userId: string }) {
 
 ---
 
+## 11. RSC Browser APIs (error)
+
+**Rule name:** `rsc-browser-apis`
+
+**What it detects:** Access to browser-specific globals (`window`, `document`, `localStorage`) inside a Server Component — a file without the `"use client"` directive.
+
+### Background
+
+Server Components execute exclusively on the server, where `window`, `document`, and `localStorage` do not exist. Accessing them throws a runtime error. Any code that depends on these APIs must be moved to a Client Component (a file with `"use client"`) or guarded with a conditional check.
+
+### Bad code
+
+```tsx
+// No "use client" — this is a Server Component
+function ServerCard() {
+  const width = window.innerWidth;                // ← ERROR
+  const token = localStorage.getItem("token");    // ← ERROR
+  return <div>{width}px — token: {token}</div>;
+}
+```
+
+### Good code
+
+```tsx
+"use client";
+
+function ClientCard() {
+  const width = window.innerWidth;                // OK
+  const token = localStorage.getItem("token");    // OK
+  return <div>{width}px — token: {token}</div>;
+}
+```
+
+### Detection logic
+
+Two AST listeners work together to catch all patterns:
+
+1. **`MemberExpression` listener** — checks the `object` of every member expression. If it is an `Identifier` named `window`, `document`, or `localStorage`, the violation is reported. Catches: `window.innerWidth`, `document.title = ...`, `localStorage.getItem(...)`.
+
+2. **`Identifier` listener** — catches standalone references like `typeof window`. A Set of node `start` positions avoids duplicate violations already reported by the `MemberExpression` listener.
+
+Both listeners are skipped entirely when the file has a `"use client"` directive (`isClientComponent === true`).
+
+### Severity rationale
+
+`error` — accessing browser globals in a Server Component always throws at runtime. The server environment has no Window, no DOM, and no persistent storage API.
+
+---
+
+## Summary
+
 | Rule | Severity | Detects |
 |------|----------|---------|
 | `rules-of-hooks` | error | Hooks inside conditionals/loops/nested functions + hooks in non-component context |
 | `naked-effect` | error | `useEffect` without a dependency array |
 | `react-calls` | error | Components called as functions + hooks referenced as values |
 | `rsc-server-hooks` | error | Hook calls in files without `"use client"` directive (Server Components) |
+| `rsc-browser-apis` | error | Browser APIs (`window`, `document`, `localStorage`) in Server Components |
 | `inline-fetching` | warning | Raw `fetch`/`axios` calls in component body |
 | `inline-style-abuse` | warning | Inline styles with > 3 CSS properties |
 | `state-fatness` | warning | Components with more than 4 `useState` calls |
